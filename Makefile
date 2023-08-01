@@ -6,7 +6,7 @@ CXX = clang++
 CXX_FLAGS = -Wall -Wextra -std=c++17 -g
 CXX_FLAGS += -Ofast -march=native
 INCLUDE = -Iinclude/
-LIBS = -lstdc++ -stdlib=libc++ -fopenmp -lgomp -pthread
+LIBS = -lstdc++ -stdlib=libc++ -fopenmp -lgomp -lopenblas
 BIN = bin/release/main_cpu
 
 ## GPU Variables
@@ -14,15 +14,15 @@ NVCC = nvcc
 NVCC_FLAGS = -O3 -arch=sm_61 -std=c++17
 NVCC_FLAGS += -Xcompiler -Wall,-Wextra,-Wno-deprecated-gpu-targets
 NVCC_FLAGS += -Xcompiler -Ofast,-march=native
-LIBS += -lcuda -lcublas -lcudart
-BIN = bin/release/main_gpu
+CULIBS = -lcuda -lcublas -lcudart
+CUBIN = bin/release/main_gpu
 
 
 cpu:
 	$(CXX) $(CXX_FLAGS) -o $(BIN) src/* $(INCLUDE) $(LIBS)
 
 gpu:
-	$(NVCC) $(NVCC_FLAGS) -o $(BIN) src/* $(INCLUDE) $(LIBS)
+	$(NVCC) $(NVCC_FLAGS) -o $(CUBIN) src/* $(INCLUDE) $(CULIBS)
 
 run: cpu
 	./bin/release/main_cpu

@@ -1,87 +1,50 @@
 #include <iostream>
 #include <vector>
-#include <string>
+#include <chrono>
 #include <random>
-#include <omp.h>
-#include <unordered_map>
-#include <algorithm>
 
-
-std::vector<std::vector<std::string>> shingle(std::vector<std::string> &data, std::unordered_map<std::string, unsigned int>& vocab, int k) {
-	std::vector<std::vector<std::string>> shingles;
-
-	// Iterate over all documents
-	for (int idx = 0; idx < data.size(); ++idx) {
-		std::vector<std::string> shingle;
-		// Iterate over all k-grams
-		for (int idx2 = 0; idx2 < data[idx].size() - k + 1; ++idx2) {
-			std::string kgram = data[idx].substr(idx2, k);
-			// If k-gram is not in vocab, add it
-			if (vocab.find(kgram) == vocab.end()) {
-				vocab[kgram] = vocab.size();
-			}
-			shingle.push_back(kgram);
-		}
-		shingles.push_back(shingle);
-	}
-
-	return shingles;
-}
-
-char hash_string(const std::string& str) {
-	char hash = 0;
-	for (char ch : str) {
-		hash = ((hash << 5) + hash) + ch;
-	}
-	return hash % 4;
-}
-
-std::vector<char> hash_dataset(std::vector<std::string> &string_data, int n_hashes) {
-	std::unordered_map<std::string, unsigned int> vocab;
-	std::vector<std::vector<std::string>> shingles = shingle(string_data, vocab, 4);
-
-	// Hash into 16 buckets represented by 4 bits
-	std::vector<char> signatures(n_hashes * shingles.size() / 2);
-
-	#pragma omp parallel for
-	for (int idx = 0; idx < n_hashes; ++idx) {
-		int rand_int = rand() % 1024;
-
-		char hash_bit_repr = 0;
-		for (int jdx = 0; jdx < (int)shingles.size(); ++jdx) {
-			char min_hash = 16;
-
-			for (int kdx = 0; kdx < (int)shingles[jdx].size(); ++kdx) {
-				min_hash = std::min(hash_string(shingles[jdx][kdx]), min_hash);
-			}
-			
-			if (jdx % 2 == 0) {
-				hash_bit_repr = min_hash;
-			} 
-			else {
-				hash_bit_repr = (hash_bit_repr << 4) + min_hash;
-				signatures[idx * 8 + (jdx / 2)] = hash_bit_repr;
-			}
-		}
-	}
-
-	return signatures;
-}
+#include "../include/exact.h"
+#include "../include/product_quantization.h"
 
 
 int main() {
-	// Generate 1000000 random strings of length 25
-	std::vector<std::string> data;
-	for (int idx = 0; idx < 1000000; ++idx) {
-		std::string random_string = "";
-		for (int idx2 = 0; idx2 < 25; ++idx2) {
-			random_string += (char) (rand() % 26 + 97);
-		}
-		data.push_back(random_string);
+	const long DIM = 512;
+	const long N   = 1000 * 100;
+
+	std::vector<float> data;
+	data.reserve(N * DIM);
+
+	std::mt19937 gen(std::random_device{}()); // Mersenne Twister engine
+	// Set seed
+	gen.seed(0);
+	std::uniform_real_distribution<float> dist(0.0f, 1.0f);
+
+	for (long idx = 0; idx < N * DIM; ++idx) {
+		data.push_back(dist(gen));
 	}
 
-	std::vector<char> signatures = hash_dataset(data, 128);
-	std::cout << "Number of signatures: " << signatures.size() << std::endl;
+	std::vector<uint8_t> quantized_data = product_quantize(data, DIM, 32, 32);
+
+	std::cout << "Original data size:  " << data.size() * sizeof(float) / 1048576 << " MB" << std::endl;
+	std::cout << "Quantized data size: " << quantized_data.size() * sizeof(uint8_t) / 1048576 << " MB" << std::endl;
+
+	auto start = std::chrono::high_resolution_clock::now();
+	// std::vector<std::vector<std::pair<float, int>>> results = get_exact_knn(data, data, DIM, 5);
+	// std::vector<std::vector<std::pair<float, int>>> results = get_exact_knn_blas(data, data, DIM, 5);
+	std::vector<std::vector<std::pair<float, int>>> results = get_exact_knn_blas(quantized_data, quantized_data, 32, 5);
+	// std::vector<std::vector<std::pair<float, int>>> results = get_exact_knn(quantized_data, quantized_data, 32, 5);
+	auto end = std::chrono::high_resolution_clock::now();
+
+	std::cout << "Time: ";
+	std::cout << std::chrono::duration_cast<std::chrono::milliseconds>(end - start).count();
+	std::cout << " ms" << std::endl;
+
+	std::cout << "Nearest neighbors: \n";
+	std::cout << "(distance: " << results[500][0].first << ", index: " << results[500][0].second << ")" << std::endl;
+	std::cout << "(distance: " << results[500][1].first << ", index: " << results[500][1].second << ")" << std::endl;
+	std::cout << "(distance: " << results[500][2].first << ", index: " << results[500][2].second << ")" << std::endl;
+	std::cout << "(distance: " << results[500][3].first << ", index: " << results[500][3].second << ")" << std::endl;
+	std::cout << "(distance: " << results[500][4].first << ", index: " << results[500][4].second << ")" << std::endl;
 
 	return 0;
 }
