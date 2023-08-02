@@ -18,3 +18,5 @@ void vector_sum(const T* a, const T* b, T* result, int dim) {
 		result[idx] = a[idx] + b[idx];
 	}
 }
+
+void l2_norm_data(std::vector<float>& data, int dim);
