@@ -4,6 +4,9 @@
 #include <vector>
 #include <omp.h>
 
+#include <pybind11/pybind11.h>
+#include <pybind11/numpy.h>
+
 #include "../include/distance.h"
 
 
@@ -78,12 +81,15 @@ std::vector<std::vector<std::pair<float, int>>> get_exact_knn_blas(
 	long num_data = data.size() / dim;
 
 	// Assume 
-	// num_cores * (L1 + L2) + L3 = 32 MB
+	// num_cores * (L1 + L2) + L3 ~= 32 MB
 	// 33_554_432 = 32 * 1024 * 1024
 	// 33_554_432 = (dim * sizeof(float) * optimal_batch_size)
 	// optimal_batch_size = 33_554_432 / (dim * sizeof(float))
 	// const int BATCH_SIZE = 16384;
-	int BATCH_SIZE = std::min((int)(query_vectors.size() * 0.1f / dim), (int)(33554432 / (dim * sizeof(float))));
+	int BATCH_SIZE = std::min(
+			(int)(query_vectors.size() * 0.1f / dim), 
+			(int)(33554432 / (dim * sizeof(float)))
+			);
 	if (BATCH_SIZE < 1024) {
 		BATCH_SIZE = (int)num_queries;
 	}
@@ -92,13 +98,13 @@ std::vector<std::vector<std::pair<float, int>>> get_exact_knn_blas(
 	std::vector<float> normed_query_vectors(num_queries * dim);
 	std::vector<float> normed_data(num_data * dim);
 
-	#pragma omp parallel for
+	#pragma omp parallel for if (num_queries > 40)
 	for (int query_idx = 0; query_idx < num_queries * dim; ++query_idx) {
 		normed_query_vectors[query_idx] = (float)query_vectors[query_idx];
 	}
 	l2_norm_data(normed_query_vectors, dim);
 
-	#pragma omp parallel for
+	#pragma omp parallel for if (num_queries > 40)
 	for (int data_idx = 0; data_idx < num_data * dim; ++data_idx) {
 		normed_data[data_idx] = (float)data[data_idx];
 	}
@@ -134,7 +140,7 @@ std::vector<std::vector<std::pair<float, int>>> get_exact_knn_blas(
 				num_data								// ldc
 				);
 
-		#pragma omp parallel for
+		#pragma omp parallel for if (num_queries > 40)
         for (int query_idx = 0; query_idx < current_batch_size; ++query_idx) {
             std::vector<std::pair<float, int>> all_distances(num_data);
             
@@ -163,6 +169,9 @@ class FlatIndexL2 {
 		~FlatIndexL2() { delete &data; }
 
 		void add(std::vector<float>& data);
+		void add_wrapper(pybind11::array_t<float> data);
 		void train(std::vector<float>& data [[maybe_unused]]) {};
+		void train_wrapper(pybind11::array_t<float> data [[maybe_unused]]) {};
 		std::vector<std::vector<std::pair<float, int>>> search(const std::vector<float>& query, int k);
+		std::vector<std::vector<std::pair<float, int>>> search_wrapper(pybind11::array_t<float> query, int k);
 };

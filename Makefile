@@ -17,14 +17,15 @@ CULIBS = -lcuda -lcublas -lcudart
 CUBIN = bin/release/gpu
 
 MODULE_NAME = knnlib
-PYBIN = bin/release/$(MODULE_NAME)
+PYBIN = bin/python/knnlib/$(MODULE_NAME)
 PYBIND11_FLAGS = `python3-config --extension-suffix` python/* -shared -std=c++17 -fPIC `python3 -m pybind11 --includes`
 
 py:
 	$(CXX) $(CXX_FLAGS) -o $(PYBIN)$(PYBIND11_FLAGS) src/* $(INCLUDE) $(LIBS)
+	cd bin/python && pip install .
 
 cpu:
-	$(CXX) $(CXX_FLAGS) -o $(BIN) src/* $(INCLUDE) $(LIBS)
+	$(CXX) $(CXX_FLAGS) -o $(BIN) src/* $(INCLUDE) $(LIBS) $(PYBIND_LIBS)
 
 gpu:
 	$(NVCC) $(NVCC_FLAGS) -o $(CUBIN) cuda/src/* -Icuda/include $(CULIBS)
@@ -38,3 +39,4 @@ run_gpu: gpu
 clean:
 	rm -rf bin/debug/*
 	rm -rf bin/release/*
+	rm -rf bin/python/knnlib/*

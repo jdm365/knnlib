@@ -2,6 +2,7 @@
 #include <vector>
 #include <chrono>
 #include <random>
+#include <omp.h>
 
 #include "../include/exact.h"
 #include "../include/product_quantization.h"
@@ -13,8 +14,7 @@ int main() {
 	const long INDEX_SIZE = 1000 * 1000;
 	const long QUERY_SIZE = 1000;
 
-	std::vector<float> data;
-	data.reserve(INDEX_SIZE * DIM);
+	std::vector<float> data(INDEX_SIZE * DIM);
 
 	std::mt19937 gen(std::random_device{}()); // Mersenne Twister engine
 	// Set seed
@@ -22,7 +22,7 @@ int main() {
 	std::uniform_real_distribution<float> dist(0.0f, 1.0f);
 
 	for (long idx = 0; idx < INDEX_SIZE * DIM; ++idx) {
-		data.push_back(dist(gen));
+		data[idx] = dist(gen);
 	}
 
 	FlatIndexL2 index(DIM);
