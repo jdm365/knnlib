@@ -20,3 +20,4 @@ void vector_sum(const T* a, const T* b, T* result, int dim) {
 }
 
 void l2_norm_data(std::vector<float>& data, int dim);
+std::vector<float> l2_norm_data(const std::vector<float>& data, int dim);

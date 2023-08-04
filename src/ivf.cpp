@@ -35,8 +35,10 @@ void IVFIndex::train(std::vector<float>& train_data) {
 		}
 	}
 
-	const int NUM_ITERS = 10;
-	std::vector<float> centroid_sums(num_centroids * (int)train_data.size() * dim);
+	const int NUM_ITERS = 100;
+	float LR = 0.05f;
+	const float EPS = 1e-6f;
+	std::vector<float> centroid_sums(num_centroids * dim);
 
 	for (int iteration = 0; iteration < NUM_ITERS; ++iteration) {
 		std::fill(centroid_sums.begin(), centroid_sums.end(), 0.0f);
@@ -67,18 +69,27 @@ void IVFIndex::train(std::vector<float>& train_data) {
 		}
 
 		// Get means and assign to centroids
+		double diff_avg = 0.0;
 		#pragma omp parallel for schedule(static)
 		for (int centroid_idx = 0; centroid_idx < num_centroids; ++centroid_idx) {
 			for (int dim_idx = 0; dim_idx < dim; ++dim_idx) {
-				centroids[centroid_idx * dim + dim_idx] /= centroid_counts[centroid_idx];
+				centroid_sums[centroid_idx * dim + dim_idx] /= (centroid_counts[centroid_idx] + EPS);
+				double diff = centroid_sums[centroid_idx * dim + dim_idx] - centroids[centroid_idx * dim + dim_idx];
+				centroids[centroid_idx * dim + dim_idx] += LR * diff;
+				diff_avg += std::abs(diff) / (num_centroids * dim);
 			}
-			std::cout << "Centroid: " << centroid_idx << " Counts: " << centroid_counts[centroid_idx] << std::endl;
+			// std::cout << "Centroid: " << centroid_idx << " Counts: " << centroid_counts[centroid_idx] << std::endl;
+		}
+		LR *= 0.99f;
+		// std::cout << "Iteration: " << iteration << " Diff: " << diff_avg << std::endl;
+		if (diff_avg < 0.005f) {
+			break;
 		}
 	}
 
 	// Copy vectors to centroid_vectors
 	// #pragma omp parallel for schedule(static)
-	for (int idx = 0; idx < (int)train_data.size() / dim; ++idx) {
+	for (int idx = 0; idx < (int)train_data.size() / (int)dim; ++idx) {
 		int centroid_idx = centroid_assignments[idx];
 		centroid_vectors[centroid_idx].insert(
 				centroid_vectors[centroid_idx].end(),
@@ -86,51 +97,132 @@ void IVFIndex::train(std::vector<float>& train_data) {
 				train_data.begin() + (idx + 1) * dim
 				);
 	}
+	// std::cout << "Centroid vectors size: " << centroid_vectors.size() << std::endl;
 	auto end = std::chrono::high_resolution_clock::now();
 	std::cout << "Training time: " << std::chrono::duration_cast<std::chrono::seconds>(end - start).count() << "s" << std::endl;
 }
 
 
+/*
 std::vector<std::vector<std::pair<float, int>>> IVFIndex::search(const std::vector<float>& query, int k) {
-	std::vector<std::vector<std::vector<std::pair<float, int>>>> results((int)query.size() * n_probe);
-	std::vector<std::vector<std::pair<float, int>>> final_results((int)query.size() * k);
+    int num_queries = query.size() / dim;
+    std::vector<std::vector<std::pair<float, int>>> final_results(num_queries);
 
-	// Find n_probe nearest centroids
-	std::vector<std::vector<std::pair<float, int>>> nearest_idxs = get_exact_knn_blas(
-			query, 
-			centroids, 
-			dim, 
-			n_probe
-			);
+    // Find n_probe nearest centroids
+    std::vector<std::vector<std::pair<float, int>>> nearest_idxs = get_exact_knn_blas(
+        query, 
+        centroids, 
+        dim, 
+        n_probe
+    );
 
-	for (int probe_idx = 0; probe_idx < n_probe; ++probe_idx) {
-		for (int query_idx = 0; query_idx < (int)query.size(); ++query_idx) {
-			int centroid_idx = centroid_assignments[nearest_idxs[query_idx][probe_idx].second];
-			std::cout << "Query " << query_idx << " assigned to centroid " << centroid_idx << std::endl;
-			results.push_back(get_exact_knn_blas(
-						std::vector(
-							query.begin() + query_idx * dim, 
-							query.begin() + (query_idx + 1) * dim
-							),
-						centroid_vectors[centroid_idx], 
-						dim, 
-						k
-						));
-		}
-	}
+    for (int query_idx = 0; query_idx < num_queries; ++query_idx) {
+        std::priority_queue<std::pair<float, int>, std::vector<std::pair<float, int>>, std::less<>> max_heap;
+        
+        for (int probe_idx = 0; probe_idx < n_probe; ++probe_idx) {
+            int centroid_idx = nearest_idxs[query_idx][probe_idx].second;
 
-	// Go through results and exract global min-k distances and indices
-	for (int result_idx = 0; result_idx < (int)results.size(); ++result_idx) {
-		for (int query_idx = 0; query_idx < (int)query.size(); ++query_idx) {
-			for (int k_idx = 0; k_idx < k; ++k_idx) {
-				final_results[query_idx * k + k_idx].push_back(
-						std::make_pair(
-							results[result_idx][query_idx][k_idx].first,
-							results[result_idx][query_idx][k_idx].second + result_idx * num_centroids
-							)
-						);
+			if (centroid_vectors[centroid_idx].size() == 0) {
+				continue;
 			}
+
+			std::vector<std::vector<std::pair<float, int>>> local_results = get_exact_knn_blas(
+                        std::vector<float>(
+                            query.begin() + query_idx * dim, 
+                            query.begin() + (query_idx + 1) * dim
+                        ),
+                        centroid_vectors[centroid_idx], 
+                        dim, 
+                        std::min(k, (int)centroid_vectors[centroid_idx].size() / dim)
+                    );
+            for (const auto& result_vec: local_results) {
+				for (const auto& result: result_vec) {
+					if ((int)max_heap.size() < k) {
+						max_heap.push(result);
+					} 
+					else if (result < max_heap.top()) {
+						max_heap.pop();
+						max_heap.push(result);
+					}
+            	}
+        	}
 		}
-	}
-	return final_results;
+
+        std::vector<std::pair<float, int>> top_k(k);
+        for (int idx = k - 1; idx >= 0; --idx) {
+            top_k[idx] = max_heap.top();
+            max_heap.pop();
+        }
+        final_results[query_idx] = top_k;
+    }
+    return final_results;
+}
+*/
+
+std::vector<std::vector<std::pair<float, int>>> IVFIndex::search(const std::vector<float>& _query, int k) {
+	std::vector<float> query = l2_norm_data(_query, dim);
+
+    int num_queries = query.size() / dim;
+    std::vector<std::vector<std::pair<float, int>>> final_results(num_queries);
+
+    // Find n_probe nearest centroids
+	auto start = std::chrono::high_resolution_clock::now();
+    std::vector<std::vector<std::pair<float, int>>> nearest_idxs = get_exact_knn_blas(
+        query, 
+        centroids, 
+        dim, 
+        n_probe
+    );
+
+	auto end = std::chrono::high_resolution_clock::now();
+	auto nearest_idxs_time = std::chrono::duration_cast<std::chrono::milliseconds>(end - start).count();
+
+	start = std::chrono::high_resolution_clock::now();
+
+	// Upper bound on size of distances. If all data were in one centroid.
+	std::vector<float> distances((int)data.size() / (int)dim);
+
+    for (int query_idx = 0; query_idx < num_queries; ++query_idx) {
+        std::priority_queue<std::pair<float, int>, std::vector<std::pair<float, int>>, std::less<>> max_heap;
+        
+        for (int probe_idx = 0; probe_idx < n_probe; ++probe_idx) {
+            int centroid_idx = nearest_idxs[query_idx][probe_idx].second;
+
+			if (centroid_vectors[centroid_idx].size() == 0) {
+				continue;
+			}
+
+			std::vector<std::pair<float, int>> local_results = _get_exact_knn(
+					query.data() + query_idx * dim,
+					centroid_vectors[centroid_idx],
+					distances,
+					dim,
+					std::min(k, (int)centroid_vectors[centroid_idx].size() / dim)
+					);
+
+            for (const auto& result: local_results) {
+				if ((int)max_heap.size() < k) {
+					max_heap.push(result);
+				} 
+				else if (result < max_heap.top()) {
+					max_heap.pop();
+					max_heap.push(result);
+				}
+        	}
+		}
+
+        std::vector<std::pair<float, int>> top_k(k);
+        for (int idx = k - 1; idx >= 0; --idx) {
+            top_k[idx] = max_heap.top();
+            max_heap.pop();
+        }
+        final_results[query_idx] = top_k;
+    }
+	end = std::chrono::high_resolution_clock::now();
+	auto search_time = std::chrono::duration_cast<std::chrono::milliseconds>(end - start).count();
+
+	std::cout << "Nearest idxs time ratio: " << (float)nearest_idxs_time / (nearest_idxs_time + search_time) << std::endl;
+	std::cout << "Search time ratio: " << (float)search_time / (nearest_idxs_time + search_time) << std::endl;
+	std::cout << "Total time: " << nearest_idxs_time + search_time << "ms" << std::endl;
+    return final_results;
 }

@@ -13,6 +13,8 @@ int main() {
 	const long DIM = 512;
 	const long INDEX_SIZE = 1000 * 1000;
 	const long QUERY_SIZE = 1000;
+	const int NUM_CENTROIDS = 4096;
+	const int N_PROBE = 32;
 
 	std::vector<float> data(INDEX_SIZE * DIM);
 
@@ -25,8 +27,8 @@ int main() {
 		data[idx] = dist(gen);
 	}
 
-	FlatIndexL2 index(DIM);
-	// IVFIndex index(DIM);
+	// FlatIndexL2 index(DIM);
+	IVFIndex index(DIM, NUM_CENTROIDS, N_PROBE);
 	index.add(data);
 	index.train(data);
 

@@ -62,7 +62,7 @@ __global__ void find_k_smallest_distances(
 
             // Save the result
             topk_indices[query_idx * k + k_idx] = min_idx;
-            topk_distances[query_idx * k + k_idx] = 1.0f - min_value;
+            topk_distances[query_idx * k + k_idx] = 2.0f - 2.0f * min_value;
         }
 
 		for (int k_idx = 0; k_idx < k; ++k_idx) {

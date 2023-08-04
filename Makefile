@@ -25,7 +25,7 @@ py:
 	cd bin/python && pip install .
 
 cpu:
-	$(CXX) $(CXX_FLAGS) -o $(BIN) src/* $(INCLUDE) $(LIBS) $(PYBIND_LIBS)
+	$(CXX) $(CXX_FLAGS) -o $(BIN) src/* $(INCLUDE) $(LIBS) `python3 -m pybind11 --includes`
 
 gpu:
 	$(NVCC) $(NVCC_FLAGS) -o $(CUBIN) cuda/src/* -Icuda/include $(CULIBS)

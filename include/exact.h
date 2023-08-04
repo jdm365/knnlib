@@ -10,6 +10,7 @@
 #include "../include/distance.h"
 
 
+/*
 template <typename T>
 std::vector<std::pair<float, int>> _get_exact_knn(
 	const T* query_vector,
@@ -41,6 +42,57 @@ std::vector<std::pair<float, int>> _get_exact_knn(
 			result.pop_back();
 			min_distance_to_keep = result.back().first;
 		}
+	}
+
+	return result;
+}
+*/
+
+template <typename T>
+std::vector<std::pair<float, int>> _get_exact_knn(
+	const T* query_vector,
+	const std::vector<T>& data,
+	std::vector<float>& distances,
+	int dim,
+	int k = 5
+	) {
+	// Calculate distances by dot product
+	// query (1, dim) -> query.T (dim, 1)
+	// data (n, dim) 
+	// distances (n, 1)
+	// distances = data @ query.T
+	cblas_sgemv(
+			CblasRowMajor, // assuming data is stored in row-major order
+			CblasNoTrans,  // no transpose of data
+			data.size() / dim, // number of rows
+			dim,          // number of columns
+			1.0f,         // alpha
+			data.data(),  // data matrix
+			dim,          // leading dimension of data
+			query_vector, // query vector
+			1,            // increment for the elements of query_vector
+			0.0f,         // beta
+			distances.data(), // result vector
+			1             // increment for the elements of result vector
+		);
+
+
+	// Partial sort distances to get k largest and their indices
+	std::vector<int> indices(data.size() / dim);
+	std::iota(indices.begin(), indices.end(), 0);
+	std::partial_sort(
+		indices.begin(),
+		indices.begin() + k,
+		indices.end(),
+		[&distances](int a, int b) {
+			return distances[a] > distances[b];
+		}
+		);
+
+	std::vector<std::pair<float, int>> result;
+	result.reserve(k + 1);
+	for (int idx = 0; idx < k; ++idx) {
+		result.push_back(std::make_pair(2.0f - 2.0f * distances[indices[idx]], indices[idx]));
 	}
 
 	return result;
@@ -146,7 +198,7 @@ std::vector<std::vector<std::pair<float, int>>> get_exact_knn_blas(
             
             for (int data_idx = 0; data_idx < num_data; ++data_idx) {
                 all_distances[data_idx] = std::make_pair(
-						1.0f - distances[query_idx * num_data + data_idx], 
+						2.0f - 2.0f * distances[query_idx * num_data + data_idx], 
 						data_idx
 						);
             }
