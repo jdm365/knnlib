@@ -3,10 +3,16 @@
 
 ## CPU Variables
 CXX = clang++
+#CXX = g++
 CXX_FLAGS = -Wall -Wextra -std=c++17 -g
-CXX_FLAGS += -Ofast -march=native
+CXX_FLAGS += -O3 -march=native -mtune=native -funroll-loops -fomit-frame-pointer
+CXX_FLAGS += -ffast-math -fno-finite-math-only -fno-signed-zeros -fno-trapping-math
 INCLUDE = -Iinclude/
-LIBS = -lstdc++ -stdlib=libc++ -fopenmp -lgomp -lopenblas
+LIBS = -lstdc++ -fopenmp -lgomp -lopenblas
+CLANG_LIBS = -stdlib=libc++
+ifeq ($(CXX),clang++)
+	LIBS += $(CLANG_LIBS)
+endif
 BIN = bin/release/cpu
 
 ## GPU Variables
@@ -39,4 +45,4 @@ run_gpu: gpu
 clean:
 	rm -rf bin/debug/*
 	rm -rf bin/release/*
-	rm -rf bin/python/knnlib/*
+	rm -rf bin/python/knnlib/*.so

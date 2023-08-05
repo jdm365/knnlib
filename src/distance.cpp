@@ -1,3 +1,4 @@
+#include <cstring>
 #include <vector>
 #include <omp.h>
 #include <cblas.h>
@@ -14,7 +15,6 @@ void l2_norm_data(std::vector<float>& data, int dim) {
 				data.data() + idx * dim,
 				1
 				);
-		_Pragma("clang loop vectorize(enable) interleave(enable)")
 		for (int d = 0; d < dim; ++d) {
 			data[idx * dim + d] /= (norm + ETA);
 		}

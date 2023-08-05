@@ -17,6 +17,7 @@ class IVFIndex {
 		std::vector<float> centroids;
 		std::vector<std::vector<float>> centroid_vectors = std::vector<std::vector<float>>(num_centroids);
 		std::vector<int> centroid_assignments;
+		std::vector<std::vector<int>> centroid_indices = std::vector<std::vector<int>>(num_centroids);
 
 		IVFIndex(
 				int dim,

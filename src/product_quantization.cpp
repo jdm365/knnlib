@@ -1,5 +1,6 @@
 #include <iostream>
 #include <vector>
+#include <cstring>
 #include <assert.h>
 #include <random>
 

@@ -2,6 +2,8 @@
 
 #include <iostream>
 #include <vector>
+#include <chrono>
+#include <queue>
 #include <omp.h>
 
 #include <pybind11/pybind11.h>
@@ -10,49 +12,95 @@
 #include "../include/distance.h"
 
 
-/*
 template <typename T>
-std::vector<std::pair<float, int>> _get_exact_knn(
-	const T* query_vector,
-	const std::vector<T>& data,
-	int dim,
-	int k = 5
-	) {
-	std::vector<std::pair<float, int>> result;
-	result.reserve(k + 1);
+std::vector<std::pair<float, int>> custom_partial_argsort(
+		const std::vector<T>& distances,
+		const int k
+		) {
+	std::vector<std::pair<float, int>> mink_pairs(k);
+	int   mink_idxs[100];
+	float mink_values[100] = {std::numeric_limits<float>::max()};
 
-	float min_distance_to_keep = std::numeric_limits<float>::max();
-
-	for (int idx = 0; idx < (int)data.size() / (int)dim; ++idx) {
-		float distance = distance_l2(
-				query_vector,
-				data.data() + idx * dim,
-				dim
-				);
-
-		if (idx < k) {
-			result.push_back(std::make_pair(distance, idx));
-		}
-
-		else if (distance < min_distance_to_keep) {
-			result.push_back(std::make_pair(distance, idx));
-			std::sort(result.begin(), result.end(), [](const auto& a, const auto& b) {
-				return b.first > a.first; // Sorting by distance in descending order
-			});
-			result.pop_back();
-			min_distance_to_keep = result.back().first;
+	for (int idx = 0; idx < (int)distances.size(); ++idx) {
+		if (distances[idx] < mink_values[k-1]) {
+			int insert_idx = k-1;
+			while (insert_idx > 1 && distances[idx] < mink_values[insert_idx-1]) {
+				mink_values[insert_idx] = mink_values[insert_idx-1];
+				mink_idxs[insert_idx] = mink_idxs[insert_idx-1];
+				--insert_idx;
+			}
+			mink_values[insert_idx] = distances[idx];
+			mink_idxs[insert_idx] = idx;
 		}
 	}
 
-	return result;
+	for (int idx = 0; idx < k; ++idx) {
+		mink_pairs[idx] = std::make_pair(mink_values[idx], mink_idxs[idx]);
+	}
+
+	return mink_pairs;
+}
+
+
+/*
+template <typename T>
+std::vector<std::pair<float, int>> custom_partial_argsort(
+		std::vector<T>& distances,
+		int k
+		) {
+	std::vector<std::pair<float, int>> mink_pairs(k);
+	int   mink_idxs[100];
+	float mink_values[100] = {std::numeric_limits<float>::max()};
+	float kth_smallest = std::numeric_limits<float>::max();
+
+	for (int idx = 0; idx < (int)distances.size(); ++idx) {
+		if (idx < k) {
+			mink_values[idx] = distances[idx];
+			mink_idxs[idx]   = idx;
+
+			kth_smallest = std::max(kth_smallest, distances[idx]);
+
+			// Sort values and idxs
+			for (int jdx = idx; jdx > 0; --jdx) {
+				if (mink_values[jdx] < mink_values[jdx - 1]) {
+					std::swap(mink_values[jdx], mink_values[jdx - 1]);
+					std::swap(mink_idxs[jdx],   mink_idxs[jdx - 1]);
+				}
+			}
+			continue;
+		}
+
+		if (distances[idx] < kth_smallest) {
+			mink_values[k - 1] = distances[idx];
+			mink_idxs[k - 1]   = idx;
+
+			// Sort values and idxs
+			for (int jdx = k - 1; jdx > 0; --jdx) {
+				if (mink_values[jdx] < mink_values[jdx - 1]) {
+					std::swap(mink_values[jdx], mink_values[jdx - 1]);
+					std::swap(mink_idxs[jdx],   mink_idxs[jdx - 1]);
+				}
+			}
+
+			kth_smallest = mink_values[k - 1];
+		}
+	}
+
+	for (int idx = 0; idx < k; ++idx) {
+		mink_pairs[idx] = std::make_pair(mink_values[idx], mink_idxs[idx]);
+	}
+
+	return mink_pairs;
 }
 */
 
 template <typename T>
+// std::vector<std::pair<float, int>> _get_exact_knn(
 std::vector<std::pair<float, int>> _get_exact_knn(
 	const T* query_vector,
 	const std::vector<T>& data,
 	std::vector<float>& distances,
+	std::vector<int>& indices,
 	int dim,
 	int k = 5
 	) {
@@ -76,28 +124,35 @@ std::vector<std::pair<float, int>> _get_exact_knn(
 			1             // increment for the elements of result vector
 		);
 
-
 	// Partial sort distances to get k largest and their indices
-	std::vector<int> indices(data.size() / dim);
-	std::iota(indices.begin(), indices.end(), 0);
-	std::partial_sort(
-		indices.begin(),
-		indices.begin() + k,
-		indices.end(),
-		[&distances](int a, int b) {
-			return distances[a] > distances[b];
-		}
-		);
+	auto start = std::chrono::high_resolution_clock::now();
+	/*
+	std::nth_element(indices.begin(), indices.begin() + k, indices.end(),
+        [&distances](int a, int b) {
+            return distances[a] > distances[b];
+        }
+    );
 
-	std::vector<std::pair<float, int>> result;
-	result.reserve(k + 1);
-	for (int idx = 0; idx < k; ++idx) {
-		result.push_back(std::make_pair(2.0f - 2.0f * distances[indices[idx]], indices[idx]));
-	}
+    // Sort the top k elements
+    std::sort(indices.begin(), indices.begin() + k,
+        [&distances](int a, int b) {
+            return distances[a] > distances[b];
+        }
+    );
 
+    std::vector<std::pair<float, int>> result;
+    result.reserve(k);
+    for (int idx = 0; idx < k; ++idx) {
+        result.push_back(std::make_pair(2.0f - 2.0f * distances[indices[idx]], indices[idx]));
+    }
+	*/
+	std::vector<std::pair<float, int>> result = custom_partial_argsort(distances, k);
+
+	auto end = std::chrono::high_resolution_clock::now();
+	auto partial_sort_time = std::chrono::duration_cast<std::chrono::microseconds>(end - start).count();
+	std::cout << "Partial sort time: " << partial_sort_time << std::endl;
 	return result;
 }
-
 
 template <typename T>
 std::vector<std::vector<std::pair<float, int>>> get_exact_knn(
@@ -227,3 +282,4 @@ class FlatIndexL2 {
 		std::vector<std::vector<std::pair<float, int>>> search(const std::vector<float>& query, int k);
 		std::vector<std::vector<std::pair<float, int>>> search_wrapper(pybind11::array_t<float> query, int k);
 };
+
