@@ -4,6 +4,7 @@
 #include <array>
 #include <vector>
 #include <chrono>
+#include <algorithm>
 #include <list>
 #include <queue>
 #include <omp.h>
@@ -11,9 +12,9 @@
 #include <pybind11/pybind11.h>
 #include <pybind11/numpy.h>
 
+#include "../include/ivf.h"
 #include "../include/distance.h"
 #include "../include/sort.h"
-
 
 template <typename T>
 std::vector<std::pair<float, int>> _get_exact_knn_fused(
@@ -28,12 +29,16 @@ std::vector<std::pair<float, int>> _get_exact_knn_fused(
 	// data (n, dim) 
 	// distances (n, 1)
 	// distances = data @ query.T
-	// auto start = std::chrono::high_resolution_clock::now();
-	std::priority_queue<std::pair<float, int>> max_heap; // Stores negative distances to act as a min-heap
-	int chunk_size = 1024; // Choose based on your cache size and problem requirements
 
-	for (int chunk_start = 0; chunk_start < (int)data.size() / dim; chunk_start += chunk_size) {
-		int chunk_rows = std::min(chunk_size, (int)data.size() / dim - chunk_start);
+	// auto start = std::chrono::high_resolution_clock::now();
+	std::priority_queue<
+		std::pair<float, int>,
+		std::vector<std::pair<float, int>>,
+		std::greater<std::pair<float, int>>
+	> max_heap;
+
+	for (int chunk_start = 0; chunk_start < (int)data.size() / dim; chunk_start += CHUNK_SIZE) {
+		int chunk_rows = std::min(CHUNK_SIZE, ((int)data.size() / dim) - chunk_start);
 		
 		cblas_sgemv(
 			CblasRowMajor,
@@ -52,10 +57,12 @@ std::vector<std::pair<float, int>> _get_exact_knn_fused(
 
 		for (int idx = 0; idx < chunk_rows; ++idx) {
 			float distance = chunk_distances[idx];
-			if ((int)max_heap.size() < k || distance > max_heap.top().first) {
-				if ((int)max_heap.size() == k) {
-					max_heap.pop();
-				}
+			if ((int)max_heap.size() < k) {
+				max_heap.push({distance, chunk_start + idx});
+				continue;
+			}
+			if (distance > max_heap.top().first) {
+				max_heap.pop();
 				max_heap.push({distance, chunk_start + idx});
 			}
 		}
@@ -68,10 +75,10 @@ std::vector<std::pair<float, int>> _get_exact_knn_fused(
 		result.emplace_back(2.0f - 2.0f * max_heap.top().first, max_heap.top().second);
 		max_heap.pop();
 	}
-
 	// auto end = std::chrono::high_resolution_clock::now();
+	// auto search_time = std::chrono::duration_cast<std::chrono::microseconds>(end - start).count();
+	// std::cout << "Search time: " << search_time << std::endl << std::endl;
 
-	// std::cout << "Time: " << std::chrono::duration_cast<std::chrono::microseconds>(end - start).count() << std::endl;
 	return result;
 }
 
@@ -265,6 +272,74 @@ std::vector<std::vector<std::pair<float, int>>> get_exact_knn_blas(
             std::partial_sort(all_distances.begin(), all_distances.begin() + k, all_distances.end());
             results[batch_idx + query_idx].assign(all_distances.begin(), all_distances.begin() + k);
         }
+    }
+
+	return results;
+}
+
+
+
+template <typename T>
+std::vector<int> get_centroid_assignments(
+    const std::vector<T>& query_vectors,
+    const std::vector<T>& data,
+    int dim
+	) {
+    long num_queries = query_vectors.size() / dim;
+	long num_data = data.size() / dim;
+
+	const int BATCH_SIZE = 1024;
+
+	// Allocate memory for results
+	std::vector<int> results(num_queries);
+
+	// Allocate memory for distances and indices
+	std::vector<float> distances(BATCH_SIZE * num_data);
+
+	for (int batch_idx = 0; batch_idx < num_queries; batch_idx += BATCH_SIZE) {
+		int current_batch_size = std::min((long)BATCH_SIZE, num_queries - batch_idx);
+
+		// Get distances with Blas SGEMM
+		// distances = query_batch * data^T
+		// query_batch: (current_batch_size, dim)
+		// data: (num_data, dim)
+		// distances: (current_batch_size, num_data)
+		cblas_sgemm(
+				CblasRowMajor,
+				CblasNoTrans,
+				CblasTrans,
+				current_batch_size,						// M
+				num_data,								// N
+				dim,									// K
+				1.0f,									// alpha
+				query_vectors.data() + batch_idx * dim,	// A
+				dim,									// lda
+				data.data(),							// B
+				dim,									// ldb
+				0.0f,									// beta
+				distances.data(),						// C
+				num_data								// ldc
+				);
+
+		// Get argmins of distances.
+		// #pragma omp parallel for schedule(static)
+		for (int query_idx = 0; query_idx < current_batch_size; ++query_idx) {
+			/*
+			float max_dist = -1.0f;
+			int   max_idx  = -1;
+			for (int dist_idx = 0; dist_idx < num_data; ++dist_idx) {
+				if (distances[query_idx * num_data + dist_idx] > max_dist) {
+					max_dist = distances[query_idx * num_data + dist_idx];
+					max_idx = dist_idx;
+				}
+			}
+			results[batch_idx + query_idx] = max_idx;
+			*/
+			results[batch_idx + query_idx] = argmax(
+					distances.data() + query_idx * num_data, 
+					(int)num_data
+					);
+		}
     }
 
 	return results;

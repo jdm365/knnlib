@@ -1,13 +1,10 @@
 #pragma once
 
 #include <iostream>
-#include <array>
 #include <vector>
-#include <set>
 #include <chrono>
-#include <list>
-#include <queue>
 #include <immintrin.h>
+#include <limits>
 #include <omp.h>
 
 #include <pybind11/pybind11.h>
@@ -71,3 +68,16 @@ std::vector<int> get_smallest_k_elements(
 	std::cout << "Partial sort time: " << partial_sort_time << std::endl;
 	return keep_indices;
 }
+
+
+template <typename T>
+void pair_sort(std::vector<T>& distances, std::vector<int>& indices) {
+	// From large to small
+	std::sort(indices.begin(), indices.end(),
+		[&distances](int a, int b) {
+			return distances[a] > distances[b];
+		}
+	);
+}
+
+int argmax(float *a, int n);

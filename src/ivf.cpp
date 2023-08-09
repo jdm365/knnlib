@@ -13,10 +13,11 @@
 #include "../include/ivf.h"
 
 
-void IVFIndex::add(std::vector<float>& _data) {
+void IVFIndex::add(const std::vector<float>& _data) {
+	// Add to member varaible data
+	l2_norm_data(_data, dim);
 	data.insert(data.end(), _data.begin(), _data.end());
-	l2_norm_data(data, dim);
-	centroid_assignments.resize((int)_data.size() / (int)dim);
+	centroid_assignments.resize((int)data.size() / (int)dim);
 	size = (int)data.size() / (int)dim;
 }
 
@@ -25,7 +26,6 @@ void IVFIndex::train(std::vector<float>& train_data) {
 	// Calculate optimal centroids and copy vectors to centroid
 
 	std::cout << "...Training..." << std::endl;
-	auto start = std::chrono::high_resolution_clock::now();
 
 	l2_norm_data(train_data, this->dim);
 
@@ -38,14 +38,17 @@ void IVFIndex::train(std::vector<float>& train_data) {
 		}
 	}
 
-	const int NUM_ITERS = 100;
+	const int NUM_ITERS = 10;
 	float LR = 0.2f;
 	const float EPS = 1e-6f;
 	std::vector<float> centroid_sums(num_centroids * dim);
+	std::vector<int> centroid_counts(num_centroids, 0);
 
+	auto start = std::chrono::high_resolution_clock::now();
 	for (int iteration = 0; iteration < NUM_ITERS; ++iteration) {
 		std::fill(centroid_sums.begin(), centroid_sums.end(), 0.0f);
 
+		/*
 		std::vector<std::vector<std::pair<float, int>>> centroid_idxs = get_exact_knn_blas(
 				train_data,
 				centroids,
@@ -55,21 +58,28 @@ void IVFIndex::train(std::vector<float>& train_data) {
 		for (int idx = 0; idx < (int)train_data.size() / (int)dim; ++idx) {
 			centroid_assignments[idx] = centroid_idxs[idx][0].second;
 		}
+		*/
+		centroid_assignments = get_centroid_assignments(
+				train_data,
+				centroids,
+				dim
+				);
 
 		// Compute centroid sums to get means and new centroids
-		std::vector<int> centroid_counts(num_centroids, 0);
+		std::fill(centroid_counts.begin(), centroid_counts.end(), 0);
 
-		#pragma omp parallel for schedule(static)
-		for (int idx = 0; idx < (int)train_data.size() / (int)dim; ++idx) {
+		#pragma omp parallel for
+		for (int idx = 0; idx < static_cast<int>(train_data.size()) / dim; ++idx) {
 			int centroid_idx = centroid_assignments[idx];
 			cblas_saxpy(
-					dim,
-					1.0f,
-					train_data.data() + (idx * dim),
-					1,
-					centroid_sums.data() + (centroid_idx * dim),
-					1
-					);
+				dim,
+				1.0f,
+				train_data.data() + (idx * dim),
+				1,
+				centroid_sums.data() + (centroid_idx * dim),
+				1
+			);
+			#pragma omp atomic
 			centroid_counts[centroid_idx]++;
 		}
 
@@ -77,6 +87,7 @@ void IVFIndex::train(std::vector<float>& train_data) {
 		double diff_avg = 0.0;
 		#pragma omp parallel for schedule(static)
 		for (int centroid_idx = 0; centroid_idx < num_centroids; ++centroid_idx) {
+			#pragma unroll 4
 			for (int dim_idx = 0; dim_idx < dim; ++dim_idx) {
 				centroid_sums[centroid_idx * dim + dim_idx] /= (centroid_counts[centroid_idx] + EPS);
 				double diff = centroid_sums[centroid_idx * dim + dim_idx] - centroids[centroid_idx * dim + dim_idx];
@@ -84,6 +95,7 @@ void IVFIndex::train(std::vector<float>& train_data) {
 				diff_avg += std::abs(diff) / (num_centroids * dim);
 			}
 		}
+
 		LR *= 0.9f;
 		if (diff_avg < 0.005f) {
 			break;
@@ -91,7 +103,6 @@ void IVFIndex::train(std::vector<float>& train_data) {
 	}
 
 	// Copy vectors to centroid_vectors
-	// #pragma omp parallel for schedule(static)
 	for (int idx = 0; idx < (int)train_data.size() / (int)dim; ++idx) {
 		int centroid_idx = centroid_assignments[idx];
 		centroid_vectors[centroid_idx].insert(
@@ -103,9 +114,9 @@ void IVFIndex::train(std::vector<float>& train_data) {
 		// Get centroid_indices
 		centroid_indices[centroid_idx].push_back(idx);
 	}
-	// std::cout << "Centroid vectors size: " << centroid_vectors.size() << std::endl;
 	auto end = std::chrono::high_resolution_clock::now();
-	std::cout << "Training time: " << std::chrono::duration_cast<std::chrono::seconds>(end - start).count() << "s" << std::endl;
+	auto iteration_time = std::chrono::duration_cast<std::chrono::milliseconds>(end - start).count() / NUM_ITERS;
+	std::cout << "Avg. iteration time: " << iteration_time << " milliseconds" << std::endl;
 }
 
 
@@ -124,13 +135,12 @@ std::vector<std::vector<std::pair<float, int>>> IVFIndex::search(const std::vect
     );
 
 	// Upper bound on size of distances. If all data were in one centroid.
-	// std::vector<float> distances((int)data.size() / (int)dim);
-	std::vector<float> distances(1024);
+	std::vector<float> distances(CHUNK_SIZE);
     for (int query_idx = 0; query_idx < num_queries; ++query_idx) {
 		std::priority_queue<
 			std::pair<float, int>, 
 			std::vector<std::pair<float, int>>, 
-			std::less<std::pair<float, int>>
+			std::greater<std::pair<float, int>>
 		> max_heap;
 
         for (int probe_idx = 0; probe_idx < n_probe; ++probe_idx) {
@@ -140,7 +150,6 @@ std::vector<std::vector<std::pair<float, int>>> IVFIndex::search(const std::vect
 				continue;
 			}
 
-			// auto start = std::chrono::high_resolution_clock::now();
 			std::vector<std::pair<float, int>> local_results = _get_exact_knn_fused(
 					query.data() + query_idx * dim,
 					centroid_vectors[centroid_idx],
@@ -156,8 +165,10 @@ std::vector<std::vector<std::pair<float, int>>> IVFIndex::search(const std::vect
 
 				if ((int)max_heap.size() < k) {
 					max_heap.push(local_results[idx]);
-				} 
-				else if (local_results[idx].first < max_heap.top().first) {
+					continue;
+				}
+
+				if (local_results[idx].first < max_heap.top().first) {
 					max_heap.pop();
 					max_heap.push(local_results[idx]);
 				}
@@ -165,9 +176,9 @@ std::vector<std::vector<std::pair<float, int>>> IVFIndex::search(const std::vect
 		}
 
 		// Add to final_results by popping from min_heap
-		final_results[query_idx].reserve(k);
+		final_results[query_idx].resize(k);
 		for (int idx = 0; idx < k; ++idx) {
-			final_results[query_idx][k - idx - 1] = max_heap.top();
+			final_results[query_idx][idx] = max_heap.top();
 			max_heap.pop();
 		}
 	}

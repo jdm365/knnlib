@@ -39,7 +39,7 @@ def flat_search_faiss(index_data, query_data, k):
     distances, indices = index.search(query_data, k)
     print('knnlib flat search time: ', perf_counter() - init)
 
-    return distances, indices
+    return distances.tolist(), indices.tolist()
 
 
 def ivf_search_knnlib(index_data, query_data, k, n_centroids, n_probe):
@@ -48,9 +48,20 @@ def ivf_search_knnlib(index_data, query_data, k, n_centroids, n_probe):
     index.train(index_data)
 
     init = perf_counter()
-    distances, indices = index.search(query_data, k)
+    ## distances, indices = index.search(query_data, k)
+    results = index.search(query_data, k)
     print('knnlib ivf search time: ', perf_counter() - init)
-    print([x for idxs in indices for x in idxs])
+
+    distances = []
+    indices   = []
+    for result in results:
+        _distances = []
+        _indices   = []
+        for distance, _idx in result:
+            _distances.append(distance)
+            _indices.append(_idx)
+        distances.append(_distances)
+        indices.append(_indices)
 
     return distances, indices
 
@@ -65,7 +76,7 @@ def ivf_search_faiss(index_data, query_data, k, n_centroids, n_probe):
     distances, indices = index.search(query_data, k)
     print('faiss ivf search time: ', perf_counter() - init)
 
-    return distances, indices
+    return distances.tolist(), indices.tolist()
 
 
 def evaluate_performance(groundtruth, indices):
@@ -96,8 +107,8 @@ if __name__ == '__main__':
     index_data = base_data
 
     k = 100
-    n_centroids = 128 
-    n_probe = 8
+    n_centroids = 32
+    n_probe = 4
 
     # flat search
     #distances, indices = flat_search_knnlib(index_data, query_data, k)
@@ -109,6 +120,6 @@ if __name__ == '__main__':
         'distances': distances,
         'indices': indices
         }).explode(['distances', 'indices'])
-    #print(df)
+    print(df)
 
-    print(f'flat search top {k} recall: {evaluate_performance(groundtruth, indices)}')
+    print(f'Top {k} recall: {evaluate_performance(groundtruth, indices)}')
