@@ -12,9 +12,9 @@
 int main() {
 	const long DIM = 128;
 	const long INDEX_SIZE = 1000 * 1000;
-	const long QUERY_SIZE = 1000;
-	const int NUM_CENTROIDS = 128;
-	const int N_PROBE = 4;
+	const long QUERY_SIZE = 100;
+	const int NUM_CENTROIDS = 2048;
+	const int N_PROBE = 16;
 
 	std::vector<float> data(INDEX_SIZE * DIM);
 
@@ -70,11 +70,11 @@ int main() {
 	std::cout << " ms" << std::endl;
 
 	std::cout << "Nearest neighbors: \n";
-	std::cout << "(distance: " << results[0][0].first << ", index: " << results[0][0].second << ")" << std::endl;
-	std::cout << "(distance: " << results[0][1].first << ", index: " << results[0][1].second << ")" << std::endl;
-	std::cout << "(distance: " << results[0][2].first << ", index: " << results[0][2].second << ")" << std::endl;
-	std::cout << "(distance: " << results[0][3].first << ", index: " << results[0][3].second << ")" << std::endl;
-	std::cout << "(distance: " << results[0][4].first << ", index: " << results[0][4].second << ")" << std::endl;
+	std::cout << "(distance: " << results[5][0].first << ", index: " << results[5][0].second << ")" << std::endl;
+	std::cout << "(distance: " << results[5][1].first << ", index: " << results[5][1].second << ")" << std::endl;
+	std::cout << "(distance: " << results[5][2].first << ", index: " << results[5][2].second << ")" << std::endl;
+	std::cout << "(distance: " << results[5][3].first << ", index: " << results[5][3].second << ")" << std::endl;
+	std::cout << "(distance: " << results[5][4].first << ", index: " << results[5][4].second << ")" << std::endl;
 
 	return 0;
 }

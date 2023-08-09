@@ -1,8 +1,10 @@
 #pragma once
 
 #include <iostream>
+#include <array>
 #include <vector>
 #include <chrono>
+#include <list>
 #include <queue>
 #include <omp.h>
 
@@ -10,97 +12,14 @@
 #include <pybind11/numpy.h>
 
 #include "../include/distance.h"
+#include "../include/sort.h"
 
 
 template <typename T>
-std::vector<std::pair<float, int>> custom_partial_argsort(
-		const std::vector<T>& distances,
-		const int k
-		) {
-	std::vector<std::pair<float, int>> mink_pairs(k);
-	int   mink_idxs[100];
-	float mink_values[100] = {std::numeric_limits<float>::max()};
-
-	for (int idx = 0; idx < (int)distances.size(); ++idx) {
-		if (distances[idx] < mink_values[k-1]) {
-			int insert_idx = k-1;
-			while (insert_idx > 1 && distances[idx] < mink_values[insert_idx-1]) {
-				mink_values[insert_idx] = mink_values[insert_idx-1];
-				mink_idxs[insert_idx] = mink_idxs[insert_idx-1];
-				--insert_idx;
-			}
-			mink_values[insert_idx] = distances[idx];
-			mink_idxs[insert_idx] = idx;
-		}
-	}
-
-	for (int idx = 0; idx < k; ++idx) {
-		mink_pairs[idx] = std::make_pair(mink_values[idx], mink_idxs[idx]);
-	}
-
-	return mink_pairs;
-}
-
-
-/*
-template <typename T>
-std::vector<std::pair<float, int>> custom_partial_argsort(
-		std::vector<T>& distances,
-		int k
-		) {
-	std::vector<std::pair<float, int>> mink_pairs(k);
-	int   mink_idxs[100];
-	float mink_values[100] = {std::numeric_limits<float>::max()};
-	float kth_smallest = std::numeric_limits<float>::max();
-
-	for (int idx = 0; idx < (int)distances.size(); ++idx) {
-		if (idx < k) {
-			mink_values[idx] = distances[idx];
-			mink_idxs[idx]   = idx;
-
-			kth_smallest = std::max(kth_smallest, distances[idx]);
-
-			// Sort values and idxs
-			for (int jdx = idx; jdx > 0; --jdx) {
-				if (mink_values[jdx] < mink_values[jdx - 1]) {
-					std::swap(mink_values[jdx], mink_values[jdx - 1]);
-					std::swap(mink_idxs[jdx],   mink_idxs[jdx - 1]);
-				}
-			}
-			continue;
-		}
-
-		if (distances[idx] < kth_smallest) {
-			mink_values[k - 1] = distances[idx];
-			mink_idxs[k - 1]   = idx;
-
-			// Sort values and idxs
-			for (int jdx = k - 1; jdx > 0; --jdx) {
-				if (mink_values[jdx] < mink_values[jdx - 1]) {
-					std::swap(mink_values[jdx], mink_values[jdx - 1]);
-					std::swap(mink_idxs[jdx],   mink_idxs[jdx - 1]);
-				}
-			}
-
-			kth_smallest = mink_values[k - 1];
-		}
-	}
-
-	for (int idx = 0; idx < k; ++idx) {
-		mink_pairs[idx] = std::make_pair(mink_values[idx], mink_idxs[idx]);
-	}
-
-	return mink_pairs;
-}
-*/
-
-template <typename T>
-// std::vector<std::pair<float, int>> _get_exact_knn(
-std::vector<std::pair<float, int>> _get_exact_knn(
+std::vector<std::pair<float, int>> _get_exact_knn_fused(
 	const T* query_vector,
 	const std::vector<T>& data,
-	std::vector<float>& distances,
-	std::vector<int>& indices,
+	std::vector<float>& chunk_distances,
 	int dim,
 	int k = 5
 	) {
@@ -109,6 +28,69 @@ std::vector<std::pair<float, int>> _get_exact_knn(
 	// data (n, dim) 
 	// distances (n, 1)
 	// distances = data @ query.T
+	// auto start = std::chrono::high_resolution_clock::now();
+	std::priority_queue<std::pair<float, int>> max_heap; // Stores negative distances to act as a min-heap
+	int chunk_size = 1024; // Choose based on your cache size and problem requirements
+
+	for (int chunk_start = 0; chunk_start < (int)data.size() / dim; chunk_start += chunk_size) {
+		int chunk_rows = std::min(chunk_size, (int)data.size() / dim - chunk_start);
+		
+		cblas_sgemv(
+			CblasRowMajor,
+			CblasNoTrans,
+			chunk_rows,
+			dim,
+			1.0f,
+			data.data() + chunk_start * dim,
+			dim,
+			query_vector,
+			1,
+			0.0f,
+			chunk_distances.data(),
+			1
+		);
+
+		for (int idx = 0; idx < chunk_rows; ++idx) {
+			float distance = chunk_distances[idx];
+			if ((int)max_heap.size() < k || distance > max_heap.top().first) {
+				if ((int)max_heap.size() == k) {
+					max_heap.pop();
+				}
+				max_heap.push({distance, chunk_start + idx});
+			}
+		}
+	}
+
+	// Get results from max_heap
+	std::vector<std::pair<float, int>> result;
+	result.reserve(k);
+	while (!max_heap.empty()) {
+		result.emplace_back(2.0f - 2.0f * max_heap.top().first, max_heap.top().second);
+		max_heap.pop();
+	}
+
+	// auto end = std::chrono::high_resolution_clock::now();
+
+	// std::cout << "Time: " << std::chrono::duration_cast<std::chrono::microseconds>(end - start).count() << std::endl;
+	return result;
+}
+
+
+template <typename T>
+std::vector<std::pair<float, int>> _get_exact_knn(
+	const T* query_vector,
+	const std::vector<T>& data,
+	std::vector<float>& distances,
+	int dim,
+	float& threshold,
+	int k = 5
+	) {
+	// Calculate distances by dot product
+	// query (1, dim) -> query.T (dim, 1)
+	// data (n, dim) 
+	// distances (n, 1)
+	// distances = data @ query.T
+	// auto start = std::chrono::high_resolution_clock::now();
 	cblas_sgemv(
 			CblasRowMajor, // assuming data is stored in row-major order
 			CblasNoTrans,  // no transpose of data
@@ -123,9 +105,14 @@ std::vector<std::pair<float, int>> _get_exact_knn(
 			distances.data(), // result vector
 			1             // increment for the elements of result vector
 		);
+	// auto end = std::chrono::high_resolution_clock::now();
+	// auto gemv_time = std::chrono::duration_cast<std::chrono::microseconds>(end - start).count();
 
+	// std::vector<int> indices(distances.size());
+	// std::iota(indices.begin(), indices.end(), 0);
+
+	// start = std::chrono::high_resolution_clock::now();
 	// Partial sort distances to get k largest and their indices
-	auto start = std::chrono::high_resolution_clock::now();
 	/*
 	std::nth_element(indices.begin(), indices.begin() + k, indices.end(),
         [&distances](int a, int b) {
@@ -140,17 +127,33 @@ std::vector<std::pair<float, int>> _get_exact_knn(
         }
     );
 
+	std::vector<std::pair<float, int>> result;
+	result.reserve(k);
+	for (int idx = 0; idx < k; ++idx) {
+		result.emplace_back(2.0f - 2.0f * distances[indices[idx]], indices[idx]);
+	}
+	*/
+	std::vector<int> idxs = get_smallest_k_elements(distances, k, threshold);
+	if (idxs.size() == 0) {
+		// end = std::chrono::high_resolution_clock::now();
+
+		// auto partial_sort_time = std::chrono::duration_cast<std::chrono::microseconds>(end - start).count();
+		// std::cout << "gemv time: " << gemv_time << std::endl;
+		// std::cout << "Partial sort time: " << partial_sort_time << std::endl << std::endl;
+
+		return std::vector<std::pair<float, int>>();
+	}
+
     std::vector<std::pair<float, int>> result;
     result.reserve(k);
-    for (int idx = 0; idx < k; ++idx) {
-        result.push_back(std::make_pair(2.0f - 2.0f * distances[indices[idx]], indices[idx]));
-    }
-	*/
-	std::vector<std::pair<float, int>> result = custom_partial_argsort(distances, k);
+	for (int idx = 0; idx < std::min(k, (int)idxs.size()); ++idx) {
+		result.emplace_back(2.0f - 2.0f * distances[idxs[idx]], idxs[idx]);
+	}
+	// end = std::chrono::high_resolution_clock::now();
 
-	auto end = std::chrono::high_resolution_clock::now();
-	auto partial_sort_time = std::chrono::duration_cast<std::chrono::microseconds>(end - start).count();
-	std::cout << "Partial sort time: " << partial_sort_time << std::endl;
+	// auto partial_sort_time = std::chrono::duration_cast<std::chrono::microseconds>(end - start).count();
+	// std::cout << "gemv time: " << gemv_time << std::endl;
+	// std::cout << "Partial sort time: " << partial_sort_time << std::endl << std::endl;
 	return result;
 }
 

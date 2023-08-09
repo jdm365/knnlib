@@ -13,10 +13,11 @@
 #include "../include/ivf.h"
 
 
-void IVFIndex::add(std::vector<float>& data) {
-	this->data.insert(this->data.end(), data.begin(), data.end());
-	l2_norm_data(this->data, this->dim);
-	centroid_assignments.resize((int)data.size() / (int)dim);
+void IVFIndex::add(std::vector<float>& _data) {
+	data.insert(data.end(), _data.begin(), _data.end());
+	l2_norm_data(data, dim);
+	centroid_assignments.resize((int)_data.size() / (int)dim);
+	size = (int)data.size() / (int)dim;
 }
 
 void IVFIndex::train(std::vector<float>& train_data) {
@@ -82,10 +83,8 @@ void IVFIndex::train(std::vector<float>& train_data) {
 				centroids[centroid_idx * dim + dim_idx] += LR * diff;
 				diff_avg += std::abs(diff) / (num_centroids * dim);
 			}
-			// std::cout << "Centroid: " << centroid_idx << " Counts: " << centroid_counts[centroid_idx] << std::endl;
 		}
 		LR *= 0.9f;
-		// std::cout << "Iteration: " << iteration << " Diff: " << diff_avg << std::endl;
 		if (diff_avg < 0.005f) {
 			break;
 		}
@@ -100,6 +99,7 @@ void IVFIndex::train(std::vector<float>& train_data) {
 				train_data.begin() + idx * dim,
 				train_data.begin() + (idx + 1) * dim
 				);
+
 		// Get centroid_indices
 		centroid_indices[centroid_idx].push_back(idx);
 	}
@@ -116,7 +116,6 @@ std::vector<std::vector<std::pair<float, int>>> IVFIndex::search(const std::vect
     std::vector<std::vector<std::pair<float, int>>> final_results(num_queries);
 
     // Find n_probe nearest centroids
-	// auto start = std::chrono::high_resolution_clock::now();
     std::vector<std::vector<std::pair<float, int>>> nearest_idxs = get_exact_knn_blas(
         query, 
         centroids, 
@@ -124,23 +123,16 @@ std::vector<std::vector<std::pair<float, int>>> IVFIndex::search(const std::vect
         n_probe
     );
 
-	// auto end = std::chrono::high_resolution_clock::now();
-	// auto nearest_idxs_time = std::chrono::duration_cast<std::chrono::milliseconds>(end - start).count();
-
-	// start = std::chrono::high_resolution_clock::now();
-
 	// Upper bound on size of distances. If all data were in one centroid.
-	std::vector<float> distances((int)data.size() / (int)dim);
-	std::vector<int>   indices((int)data.size() / (int)dim);
-	std::iota(indices.begin(), indices.end(), 0);
-
+	// std::vector<float> distances((int)data.size() / (int)dim);
+	std::vector<float> distances(1024);
     for (int query_idx = 0; query_idx < num_queries; ++query_idx) {
-        std::priority_queue<
+		std::priority_queue<
 			std::pair<float, int>, 
 			std::vector<std::pair<float, int>>, 
-			std::less<>
+			std::less<std::pair<float, int>>
 		> max_heap;
-        
+
         for (int probe_idx = 0; probe_idx < n_probe; ++probe_idx) {
             int centroid_idx = nearest_idxs[query_idx][probe_idx].second;
 
@@ -149,38 +141,36 @@ std::vector<std::vector<std::pair<float, int>>> IVFIndex::search(const std::vect
 			}
 
 			// auto start = std::chrono::high_resolution_clock::now();
-			std::vector<std::pair<float, int>> local_results = _get_exact_knn(
+			std::vector<std::pair<float, int>> local_results = _get_exact_knn_fused(
 					query.data() + query_idx * dim,
 					centroid_vectors[centroid_idx],
 					distances,
-					indices,
 					dim,
 					std::min(k, (int)centroid_vectors[centroid_idx].size() / dim)
 					);
-			// auto end = std::chrono::high_resolution_clock::now();
-			// auto exact_knn_time = std::chrono::duration_cast<std::chrono::microseconds>(end - start).count();
 
-            for (auto& result: local_results) {
-				// Correct indices with centroid_indices
-				result.second = centroid_indices[centroid_idx][result.second];
+			// Merge local_results into min_heap
+			// Translate indices to global indices using centroid_indices
+			for (int idx = 0; idx < (int)local_results.size(); ++idx) {
+				local_results[idx].second = centroid_indices[centroid_idx][local_results[idx].second];
+
 				if ((int)max_heap.size() < k) {
-					max_heap.push(result);
+					max_heap.push(local_results[idx]);
 				} 
-				else if (result < max_heap.top()) {
+				else if (local_results[idx].first < max_heap.top().first) {
 					max_heap.pop();
-					max_heap.push(result);
+					max_heap.push(local_results[idx]);
 				}
-        	}
-			// std::cout << "Exact knn time: " << exact_knn_time << "us";
-			// std::cout << " Centroid count: " << centroid_vectors[centroid_idx].size() / dim << std::endl;
+			}
 		}
 
-        std::vector<std::pair<float, int>> top_k(k);
-        for (int idx = k - 1; idx >= 0; --idx) {
-            top_k[idx] = max_heap.top();
-            max_heap.pop();
-        }
-        final_results[query_idx] = top_k;
-    }
+		// Add to final_results by popping from min_heap
+		final_results[query_idx].reserve(k);
+		for (int idx = 0; idx < k; ++idx) {
+			final_results[query_idx][k - idx - 1] = max_heap.top();
+			max_heap.pop();
+		}
+	}
+
     return final_results;
 }

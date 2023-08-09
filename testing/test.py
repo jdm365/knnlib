@@ -1,3 +1,4 @@
+import pandas as pd
 import numpy as np
 import faiss
 import os
@@ -45,25 +46,12 @@ def ivf_search_knnlib(index_data, query_data, k, n_centroids, n_probe):
     index = IVFIndex(index_data.shape[1], n_centroids, n_probe)
     index.add(index_data)
     index.train(index_data)
-    index.nprobe = n_probe
-
-    ## 400 us * 10000 queries * 16 probes = 64s
-    ## Faiss is 2 seconds, therefore 32x faster, partial sort in 400 / 32 = 12.5 us
 
     init = perf_counter()
-    results = index.search(query_data, k)
+    distances, indices = index.search(query_data, k)
     print('knnlib ivf search time: ', perf_counter() - init)
+    print([x for idxs in indices for x in idxs])
 
-    distances = []
-    indices   = []
-    for result in results:
-        _distances = []
-        _indices   = []
-        for distance, _idx in result:
-            _distances.append(distance)
-            _indices.append(_idx)
-        distances.append(_distances)
-        indices.append(_indices)
     return distances, indices
 
 
@@ -108,13 +96,19 @@ if __name__ == '__main__':
     index_data = base_data
 
     k = 100
-    n_centroids = 1024 
-    n_probe = 16
+    n_centroids = 128 
+    n_probe = 8
 
     # flat search
     #distances, indices = flat_search_knnlib(index_data, query_data, k)
     #distances, indices = flat_search_faiss(index_data, query_data, k)
     distances, indices = ivf_search_knnlib(index_data, query_data, k, n_centroids, n_probe)
     #distances, indices = ivf_search_faiss(index_data, query_data, k, n_centroids, n_probe)
+
+    df = pd.DataFrame({
+        'distances': distances,
+        'indices': indices
+        }).explode(['distances', 'indices'])
+    #print(df)
 
     print(f'flat search top {k} recall: {evaluate_performance(groundtruth, indices)}')

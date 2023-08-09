@@ -60,7 +60,10 @@ void IVFIndex::train_wrapper(pybind11::array_t<float> train_data) {
 }
 
 
-std::vector<std::vector<std::pair<float, int>>> IVFIndex::search_wrapper(pybind11::array_t<float> query, int k) {
+std::tuple<
+	std::vector<std::vector<float>>, 
+	std::vector<std::vector<int>>
+> IVFIndex::search_wrapper(pybind11::array_t<float> query, int k) {
 	pybind11::buffer_info info = query.request();
 	if (info.ndim != 2)
 		throw std::runtime_error("Number of dimensions must be two");
@@ -69,7 +72,22 @@ std::vector<std::vector<std::pair<float, int>>> IVFIndex::search_wrapper(pybind1
 
 	std::vector<float> query_vector = std::vector<float>((float *)info.ptr, (float *)info.ptr + info.size);
 
-	return search(query_vector, k);
+	std::vector<std::vector<std::pair<float, int>>> _result = search(query_vector, k);
+	
+	// Convert to two vectors
+	std::vector<std::vector<float>> distances;
+	std::vector<std::vector<int>> indices;
+	for (auto& vec: _result) {
+		std::vector<float> dist;
+		std::vector<int> ind;
+		for (auto& pair: vec) {
+			dist.push_back(pair.first);
+			ind.push_back(pair.second);
+		}
+		distances.push_back(dist);
+		indices.push_back(ind);
+	}
+	return std::make_tuple(distances, indices);
 }
 
 PYBIND11_MODULE(knnlib, m) {
@@ -85,5 +103,8 @@ PYBIND11_MODULE(knnlib, m) {
 		.def(pybind11::init<int, int, int>())
 		.def("add", &IVFIndex::add_wrapper)
 		.def("search", &IVFIndex::search_wrapper)
-		.def("train", &IVFIndex::train_wrapper);
+		.def("train", &IVFIndex::train_wrapper)
+		.def_readwrite("size", &IVFIndex::size)
+		.def_readwrite("nprobe", &IVFIndex::n_probe);
+
 }
