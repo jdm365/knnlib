@@ -5,6 +5,7 @@
 #include <limits>
 #include <vector>
 #include <chrono>
+#include <random>
 #include <omp.h>
 
 
@@ -12,6 +13,68 @@
 #include "../include/exact.h"
 #include "../include/ivf.h"
 
+
+void kmeanspp_initialize(
+		std::vector<float>& data,
+		std::vector<float>& centroids,
+		int dim,
+		int num_centroids,
+		const int kpp_centroids
+		) {
+	centroids.resize(num_centroids * dim);
+
+	// Initialize centroids using kmeans++ algorithm
+	std::random_device rd;
+	std::mt19937 gen(rd());
+	std::uniform_real_distribution<float> dis(0, (float)data.size() / (float)dim - 1);
+
+	int rand_idx = dis(gen);
+	for (int jdx = 0; jdx < dim; ++jdx) {
+		centroids[jdx] = data[rand_idx * dim + jdx];
+	}
+
+	for (int idx = 1; idx < kpp_centroids; ++idx) {
+		std::vector<float> min_dists((int)data.size() / (int)dim, std::numeric_limits<float>::max());
+
+		// Calculate distances to closest centroids
+		min_dists = get_min_dists(
+				std::vector<float>(data.begin() + idx * dim, data.begin() + (idx + 1) * dim),
+				std::vector<float>(centroids.begin(), centroids.begin() + idx * dim),
+				dim
+				);
+
+		/*
+		#pragma omp parallel for
+		for (int jdx = 0; jdx < (int)data.size() / dim; ++jdx) {
+            for (int kdx = 0; kdx < idx; ++kdx) {
+                float dist = distance_l2(
+						data.data() + (jdx * dim),
+						centroids.data() + (kdx * dim),
+						dim
+						);
+                min_dists[jdx] = std::min(min_dists[jdx], dist);
+            }
+        }
+		*/
+
+		std::discrete_distribution<int> dist(min_dists.begin(), min_dists.end());
+		int next_centroid_idx = dist(gen);
+
+		#pragma omp parallel for
+		for (int jdx = 0; jdx < dim; ++jdx) {
+			centroids[idx * dim + jdx] = data[next_centroid_idx * dim + jdx];
+		}
+	}
+
+	// Randomly initialize remaining centroids
+	#pragma omp parallel for
+	for (int idx = kpp_centroids; idx < num_centroids; ++idx) {
+		int rand_idx = dis(gen);
+		for (int jdx = 0; jdx < dim; ++jdx) {
+			centroids[idx * dim + jdx] = data[rand_idx * dim + jdx];
+		}
+	}
+}
 
 void IVFIndex::add(const std::vector<float>& _data) {
 	// Add to member varaible data
@@ -29,18 +92,26 @@ void IVFIndex::train(std::vector<float>& train_data) {
 
 	l2_norm_data(train_data, this->dim);
 
-	// Initialize centroids
-	#pragma omp parallel for
+	// Kmeans++ initialization
+	const int kpp_centroids = 1;//(int)sqrt((int)sqrt(num_centroids));
+	kmeanspp_initialize(train_data, centroids, dim, num_centroids, kpp_centroids);
+	
+	/*
+	// Randomly initialize centroids
+	std::random_device rd;
+	std::mt19937 gen(rd());
+	std::uniform_real_distribution<float> dis(0, (float)train_data.size() / (float)dim - 1);
 	for (int idx = 0; idx < num_centroids; ++idx) {
-		int rand_idx = rand() % ((int)train_data.size() / (int)dim);
+		int rand_idx = dis(gen);
 		for (int jdx = 0; jdx < dim; ++jdx) {
 			centroids[idx * dim + jdx] = train_data[rand_idx * dim + jdx];
 		}
 	}
+	*/
 
 	const int NUM_ITERS = 10;
-	float LR = 0.2f;
-	const float EPS = 1e-6f;
+	float LR = 0.9f;
+	const float EPS = 1e-9f;
 	std::vector<float> centroid_sums(num_centroids * dim);
 	std::vector<int> centroid_counts(num_centroids, 0);
 
@@ -48,17 +119,6 @@ void IVFIndex::train(std::vector<float>& train_data) {
 	for (int iteration = 0; iteration < NUM_ITERS; ++iteration) {
 		std::fill(centroid_sums.begin(), centroid_sums.end(), 0.0f);
 
-		/*
-		std::vector<std::vector<std::pair<float, int>>> centroid_idxs = get_exact_knn_blas(
-				train_data,
-				centroids,
-				dim,
-				1	
-				);
-		for (int idx = 0; idx < (int)train_data.size() / (int)dim; ++idx) {
-			centroid_assignments[idx] = centroid_idxs[idx][0].second;
-		}
-		*/
 		centroid_assignments = get_centroid_assignments(
 				train_data,
 				centroids,
@@ -68,8 +128,7 @@ void IVFIndex::train(std::vector<float>& train_data) {
 		// Compute centroid sums to get means and new centroids
 		std::fill(centroid_counts.begin(), centroid_counts.end(), 0);
 
-		#pragma omp parallel for
-		for (int idx = 0; idx < static_cast<int>(train_data.size()) / dim; ++idx) {
+		for (int idx = 0; idx < (int)train_data.size() / dim; ++idx) {
 			int centroid_idx = centroid_assignments[idx];
 			cblas_saxpy(
 				dim,
@@ -79,7 +138,6 @@ void IVFIndex::train(std::vector<float>& train_data) {
 				centroid_sums.data() + (centroid_idx * dim),
 				1
 			);
-			#pragma omp atomic
 			centroid_counts[centroid_idx]++;
 		}
 
@@ -97,8 +155,18 @@ void IVFIndex::train(std::vector<float>& train_data) {
 		}
 
 		LR *= 0.9f;
+		std::cout << "Iteration: " << iteration << " Diff: " << diff_avg << " LR: " << LR << std::endl;
+		/*
 		if (diff_avg < 0.005f) {
 			break;
+		}
+		*/
+
+		std::vector<int> sorted_counts = centroid_counts;
+		std::sort(sorted_counts.begin(), sorted_counts.end(), std::greater<int>());
+		for (int centroid_idx = 0; centroid_idx < num_centroids; ++centroid_idx) {
+			std::cout << "Idx: " << centroid_idx << " Count: " << sorted_counts[centroid_idx] << std::endl;
+			// std::cout << "Centroid: " << centroid_idx << " Count: " << centroid_counts[centroid_idx] << std::endl;
 		}
 	}
 
@@ -140,7 +208,7 @@ std::vector<std::vector<std::pair<float, int>>> IVFIndex::search(const std::vect
 		std::priority_queue<
 			std::pair<float, int>, 
 			std::vector<std::pair<float, int>>, 
-			std::greater<std::pair<float, int>>
+			std::less<std::pair<float, int>>
 		> max_heap;
 
         for (int probe_idx = 0; probe_idx < n_probe; ++probe_idx) {
@@ -178,7 +246,7 @@ std::vector<std::vector<std::pair<float, int>>> IVFIndex::search(const std::vect
 		// Add to final_results by popping from min_heap
 		final_results[query_idx].resize(k);
 		for (int idx = 0; idx < k; ++idx) {
-			final_results[query_idx][idx] = max_heap.top();
+			final_results[query_idx][k - idx - 1] = max_heap.top();
 			max_heap.pop();
 		}
 	}

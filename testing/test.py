@@ -48,7 +48,6 @@ def ivf_search_knnlib(index_data, query_data, k, n_centroids, n_probe):
     index.train(index_data)
 
     init = perf_counter()
-    ## distances, indices = index.search(query_data, k)
     results = index.search(query_data, k)
     print('knnlib ivf search time: ', perf_counter() - init)
 
@@ -107,14 +106,15 @@ if __name__ == '__main__':
     index_data = base_data
 
     k = 100
-    n_centroids = 32
-    n_probe = 4
+    n_centroids = 256
+    n_probe = 1
 
     # flat search
     #distances, indices = flat_search_knnlib(index_data, query_data, k)
     #distances, indices = flat_search_faiss(index_data, query_data, k)
+
     distances, indices = ivf_search_knnlib(index_data, query_data, k, n_centroids, n_probe)
-    #distances, indices = ivf_search_faiss(index_data, query_data, k, n_centroids, n_probe)
+    print(f'Top {k} recall knnlib: {evaluate_performance(groundtruth, indices)}')
 
     df = pd.DataFrame({
         'distances': distances,
@@ -122,4 +122,6 @@ if __name__ == '__main__':
         }).explode(['distances', 'indices'])
     print(df)
 
-    print(f'Top {k} recall: {evaluate_performance(groundtruth, indices)}')
+    distances, indices = ivf_search_faiss(index_data, query_data, k, n_centroids, n_probe)
+    print(f'Top {k} recall faiss:  {evaluate_performance(groundtruth, indices)}')
+

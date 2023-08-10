@@ -37,11 +37,14 @@ class IVFIndex {
 		void train(std::vector<float>& train_data);
 		void train_wrapper(pybind11::array_t<float> train_data);
 		std::vector<std::vector<std::pair<float, int>>> search(const std::vector<float>& query, int k);
-		/*
-		std::tuple<
-			std::vector<std::vector<float>>, 
-			std::vector<std::vector<int>>
-		> search_wrapper(pybind11::array_t<float> query, int k);
-		*/
 		std::vector<std::vector<std::pair<float, int>>> search_wrapper(pybind11::array_t<float> query, int k);
 };
+
+
+void kmeanspp_initialize(
+		std::vector<float>& data,
+		std::vector<float>& centroids,
+		int dim,
+		int num_centroids,
+		const int kpp_centroids
+		);

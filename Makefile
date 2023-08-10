@@ -28,7 +28,7 @@ PYBIND11_FLAGS = `python3-config --extension-suffix` python/* -shared -std=c++17
 
 py:
 	$(CXX) $(CXX_FLAGS) -o $(PYBIN)$(PYBIND11_FLAGS) src/* $(INCLUDE) $(LIBS)
-	cd bin/python && pip install .
+	cd bin/python && python -m pip install .
 
 cpu:
 	$(CXX) $(CXX_FLAGS) -o $(BIN) src/* $(INCLUDE) $(LIBS) `python3 -m pybind11 --includes`

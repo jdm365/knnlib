@@ -12,9 +12,9 @@
 int main() {
 	const long DIM = 128;
 	const long INDEX_SIZE = 1024 * 1024;
-	const long QUERY_SIZE = 1024;
-	const int NUM_CENTROIDS = 32;
-	const int N_PROBE = 4;
+	const long QUERY_SIZE = 10000;
+	const int NUM_CENTROIDS = 256;
+	const int N_PROBE = 8;
 
 	std::vector<float> data(INDEX_SIZE * DIM);
 

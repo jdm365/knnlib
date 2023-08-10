@@ -61,7 +61,7 @@ std::vector<std::pair<float, int>> _get_exact_knn_fused(
 				max_heap.push({distance, chunk_start + idx});
 				continue;
 			}
-			if (distance > max_heap.top().first) {
+			if (distance > max_heap.top().first) [[unlikely]] {
 				max_heap.pop();
 				max_heap.push({distance, chunk_start + idx});
 			}
@@ -164,28 +164,6 @@ std::vector<std::pair<float, int>> _get_exact_knn(
 	return result;
 }
 
-template <typename T>
-std::vector<std::vector<std::pair<float, int>>> get_exact_knn(
-	const std::vector<T>& query_vectors,
-	const std::vector<T>& data,
-	int dim,
-	int k
-) {
-	std::vector<std::vector<std::pair<float, int>>> results;
-	results.reserve((int)query_vectors.size() / (int)dim);
-
-	#pragma omp parallel for schedule(static)
-	for (int idx = 0; idx < (int)query_vectors.size() / (int)dim; ++idx) {
-		results[idx] = _get_exact_knn(
-				query_vectors.data() + idx * dim,
-				data, 
-				dim, 
-				k
-				);
-	}
-
-	return results;
-}
 
 template <typename T>
 std::vector<std::vector<std::pair<float, int>>> get_exact_knn_blas(
@@ -212,19 +190,7 @@ std::vector<std::vector<std::pair<float, int>>> get_exact_knn_blas(
 	}
 
 	// Apply L2 normalization to all vectors
-	std::vector<float> normed_query_vectors(num_queries * dim);
-	std::vector<float> normed_data(num_data * dim);
-
-	#pragma omp parallel for if (num_queries > 40)
-	for (int query_idx = 0; query_idx < num_queries * dim; ++query_idx) {
-		normed_query_vectors[query_idx] = (float)query_vectors[query_idx];
-	}
-	l2_norm_data(normed_query_vectors, dim);
-
-	#pragma omp parallel for if (num_queries > 40)
-	for (int data_idx = 0; data_idx < num_data * dim; ++data_idx) {
-		normed_data[data_idx] = (float)data[data_idx];
-	}
+	std::vector<float> normed_data = l2_norm_data(data, dim);
 
 	// Allocate memory for results
 	std::vector<std::vector<std::pair<float, int>>> results(num_queries);
@@ -248,7 +214,7 @@ std::vector<std::vector<std::pair<float, int>>> get_exact_knn_blas(
 				num_data,								// N
 				dim,									// K
 				1.0f,									// alpha
-				normed_query_vectors.data() + batch_idx * dim,	// A
+				query_vectors.data() + batch_idx * dim,	// A
 				dim,									// lda
 				normed_data.data(),						// B
 				dim,									// ldb
@@ -282,13 +248,15 @@ std::vector<std::vector<std::pair<float, int>>> get_exact_knn_blas(
 template <typename T>
 std::vector<int> get_centroid_assignments(
     const std::vector<T>& query_vectors,
-    const std::vector<T>& data,
+    const std::vector<T>& _data,
     int dim
 	) {
     long num_queries = query_vectors.size() / dim;
-	long num_data = data.size() / dim;
+	long num_data = _data.size() / dim;
 
 	const int BATCH_SIZE = 1024;
+
+	std::vector<T> data = l2_norm_data(_data, dim);
 
 	// Allocate memory for results
 	std::vector<int> results(num_queries);
@@ -324,7 +292,6 @@ std::vector<int> get_centroid_assignments(
 		// Get argmins of distances.
 		// #pragma omp parallel for schedule(static)
 		for (int query_idx = 0; query_idx < current_batch_size; ++query_idx) {
-			/*
 			float max_dist = -1.0f;
 			int   max_idx  = -1;
 			for (int dist_idx = 0; dist_idx < num_data; ++dist_idx) {
@@ -334,11 +301,72 @@ std::vector<int> get_centroid_assignments(
 				}
 			}
 			results[batch_idx + query_idx] = max_idx;
-			*/
+			/*
 			results[batch_idx + query_idx] = argmax(
 					distances.data() + query_idx * num_data, 
 					(int)num_data
 					);
+			*/
+		}
+    }
+
+	return results;
+}
+
+template <typename T>
+std::vector<float> get_min_dists(
+    const std::vector<T>& query_vectors,
+    const std::vector<T>& _data,
+    int dim
+	) {
+    long num_queries = query_vectors.size() / dim;
+	long num_data = _data.size() / dim;
+
+	const int BATCH_SIZE = 1024;
+
+	std::vector<T> data = l2_norm_data(_data, dim);
+
+	// Allocate memory for results
+	std::vector<float> results(num_queries);
+
+	// Allocate memory for distances and indices
+	std::vector<float> distances(BATCH_SIZE * num_data);
+
+	for (int batch_idx = 0; batch_idx < num_queries; batch_idx += BATCH_SIZE) {
+		int current_batch_size = std::min((long)BATCH_SIZE, num_queries - batch_idx);
+
+		// Get distances with Blas SGEMM
+		// distances = query_batch * data^T
+		// query_batch: (current_batch_size, dim)
+		// data: (num_data, dim)
+		// distances: (current_batch_size, num_data)
+		cblas_sgemm(
+				CblasRowMajor,
+				CblasNoTrans,
+				CblasTrans,
+				current_batch_size,						// M
+				num_data,								// N
+				dim,									// K
+				1.0f,									// alpha
+				query_vectors.data() + batch_idx * dim,	// A
+				dim,									// lda
+				data.data(),							// B
+				dim,									// ldb
+				0.0f,									// beta
+				distances.data(),						// C
+				num_data								// ldc
+				);
+
+		// Get max distances.
+		#pragma omp parallel for schedule(static)
+		for (int query_idx = 0; query_idx < current_batch_size; ++query_idx) {
+			float max_dist = -1.0f;
+			for (int dist_idx = 0; dist_idx < num_data; ++dist_idx) {
+				if (distances[query_idx * num_data + dist_idx] > max_dist) {
+					max_dist = distances[query_idx * num_data + dist_idx];
+				}
+			}
+			results[batch_idx + query_idx] = 2.0f - 2.0f * max_dist;
 		}
     }
 
