@@ -106,8 +106,8 @@ if __name__ == '__main__':
     index_data = base_data
 
     k = 100
-    n_centroids = 256
-    n_probe = 1
+    n_centroids = 4096 
+    n_probe = 8
 
     # flat search
     #distances, indices = flat_search_knnlib(index_data, query_data, k)
@@ -122,6 +122,6 @@ if __name__ == '__main__':
         }).explode(['distances', 'indices'])
     print(df)
 
-    distances, indices = ivf_search_faiss(index_data, query_data, k, n_centroids, n_probe)
-    print(f'Top {k} recall faiss:  {evaluate_performance(groundtruth, indices)}')
+    #distances, indices = ivf_search_faiss(index_data, query_data, k, n_centroids, n_probe)
+    #print(f'Top {k} recall faiss:  {evaluate_performance(groundtruth, indices)}')
 

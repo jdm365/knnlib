@@ -3,6 +3,7 @@
 #include <chrono>
 #include <random>
 #include <omp.h>
+#include <cblas.h>
 
 #include "../include/exact.h"
 #include "../include/product_quantization.h"
@@ -26,6 +27,8 @@ int main() {
 	for (long idx = 0; idx < INDEX_SIZE * DIM; ++idx) {
 		data[idx] = dist(gen);
 	}
+	// omp_set_num_threads(24);
+	// openblas_set_num_threads(24);
 
 	// FlatIndexL2 index(DIM);
 	IVFIndex index(DIM, NUM_CENTROIDS, N_PROBE);

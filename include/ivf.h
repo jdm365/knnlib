@@ -8,7 +8,8 @@
 
 #include "../include/distance.h"
 
-#define CHUNK_SIZE 4096 
+// #define CHUNK_SIZE 1000 
+#define CHUNK_SIZE 900
 
 class IVFIndex {
 	public:

@@ -17,10 +17,16 @@
 #include "../include/sort.h"
 
 template <typename T>
-std::vector<std::pair<float, int>> _get_exact_knn_fused(
+void _get_exact_knn_fused(
 	const T* query_vector,
 	const std::vector<T>& data,
 	std::vector<float>& chunk_distances,
+	std::priority_queue<
+		std::pair<float, int>, 
+		std::vector<std::pair<float, int>>, 
+		std::greater<std::pair<float, int>>
+	>& max_heap,
+	std::vector<int>& index_map,
 	int dim,
 	int k = 5
 	) {
@@ -31,15 +37,11 @@ std::vector<std::pair<float, int>> _get_exact_knn_fused(
 	// distances = data @ query.T
 
 	// auto start = std::chrono::high_resolution_clock::now();
-	std::priority_queue<
-		std::pair<float, int>,
-		std::vector<std::pair<float, int>>,
-		std::greater<std::pair<float, int>>
-	> max_heap;
 
 	for (int chunk_start = 0; chunk_start < (int)data.size() / dim; chunk_start += CHUNK_SIZE) {
 		int chunk_rows = std::min(CHUNK_SIZE, ((int)data.size() / dim) - chunk_start);
 		
+		// auto start = std::chrono::high_resolution_clock::now();
 		cblas_sgemv(
 			CblasRowMajor,
 			CblasNoTrans,
@@ -54,32 +56,29 @@ std::vector<std::pair<float, int>> _get_exact_knn_fused(
 			chunk_distances.data(),
 			1
 		);
+		// auto end = std::chrono::high_resolution_clock::now();
+		// auto gemv_time = std::chrono::duration_cast<std::chrono::microseconds>(end - start).count();
 
+		// start = std::chrono::high_resolution_clock::now();
 		for (int idx = 0; idx < chunk_rows; ++idx) {
 			float distance = chunk_distances[idx];
 			if ((int)max_heap.size() < k) {
-				max_heap.push({distance, chunk_start + idx});
+				max_heap.push({distance, index_map[chunk_start + idx]});
 				continue;
 			}
-			if (distance > max_heap.top().first) [[unlikely]] {
+			// if (distance > max_heap.top().first) [[unlikely]] {
+			if (distance > max_heap.top().first) {
 				max_heap.pop();
-				max_heap.push({distance, chunk_start + idx});
+				max_heap.push({distance, index_map[chunk_start + idx]});
 			}
 		}
-	}
-
-	// Get results from max_heap
-	std::vector<std::pair<float, int>> result;
-	result.reserve(k);
-	while (!max_heap.empty()) {
-		result.emplace_back(2.0f - 2.0f * max_heap.top().first, max_heap.top().second);
-		max_heap.pop();
+		// end = std::chrono::high_resolution_clock::now();
+		// auto heap_time = std::chrono::duration_cast<std::chrono::microseconds>(end - start).count();
+		// std::cout << "gemv time: " << gemv_time << ", heap time: " << heap_time << std::endl;
 	}
 	// auto end = std::chrono::high_resolution_clock::now();
 	// auto search_time = std::chrono::duration_cast<std::chrono::microseconds>(end - start).count();
 	// std::cout << "Search time: " << search_time << std::endl << std::endl;
-
-	return result;
 }
 
 
