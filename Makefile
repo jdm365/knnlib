@@ -26,12 +26,12 @@ MODULE_NAME = knnlib
 PYBIN = bin/python/knnlib/$(MODULE_NAME)
 PYBIND11_FLAGS = `python3-config --extension-suffix` python/* -shared -std=c++17 -fPIC `python3 -m pybind11 --includes`
 
+cpu:
+	$(CXX) $(CXX_FLAGS) -o $(BIN) src/* $(INCLUDE) $(LIBS) `python3 -m pybind11 --includes`
+
 py:
 	$(CXX) $(CXX_FLAGS) -o $(PYBIN)$(PYBIND11_FLAGS) src/* $(INCLUDE) $(LIBS)
 	cd bin/python && python -m pip install .
-
-cpu:
-	$(CXX) $(CXX_FLAGS) -o $(BIN) src/* $(INCLUDE) $(LIBS) `python3 -m pybind11 --includes`
 
 gpu:
 	$(NVCC) $(NVCC_FLAGS) -o $(CUBIN) cuda/src/* -Icuda/include $(CULIBS)

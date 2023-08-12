@@ -67,6 +67,11 @@ def ivf_search_knnlib(index_data, query_data, k, n_centroids, n_probe):
 
 def ivf_search_faiss(index_data, query_data, k, n_centroids, n_probe):
     index = faiss.IndexIVFFlat(faiss.IndexFlatL2(index_data.shape[1]), index_data.shape[1], n_centroids, faiss.METRIC_L2)
+
+    ## Norm data
+    index_data = index_data / np.linalg.norm(index_data, axis=1, keepdims=True)
+    query_data = query_data / np.linalg.norm(query_data, axis=1, keepdims=True)
+
     index.train(index_data)
     index.add(index_data)
     index.nprobe = n_probe
@@ -106,8 +111,8 @@ if __name__ == '__main__':
     index_data = base_data
 
     k = 100
-    n_centroids = 4096 
-    n_probe = 8
+    n_centroids = 64
+    n_probe = 4
 
     # flat search
     #distances, indices = flat_search_knnlib(index_data, query_data, k)
@@ -120,8 +125,13 @@ if __name__ == '__main__':
         'distances': distances,
         'indices': indices
         }).explode(['distances', 'indices'])
-    print(df)
+    print(df.head(20))
 
-    #distances, indices = ivf_search_faiss(index_data, query_data, k, n_centroids, n_probe)
-    #print(f'Top {k} recall faiss:  {evaluate_performance(groundtruth, indices)}')
+    distances, indices = ivf_search_faiss(index_data, query_data, k, n_centroids, n_probe)
+    print(f'Top {k} recall faiss:  {evaluate_performance(groundtruth, indices)}')
 
+    df = pd.DataFrame({
+        'distances': distances,
+        'indices': indices
+        }).explode(['distances', 'indices'])
+    print(df.head(20))

@@ -13,11 +13,11 @@
 int main() {
 	const long DIM = 128;
 	const long INDEX_SIZE = 1024 * 1024;
-	const long QUERY_SIZE = 10000;
-	const int NUM_CENTROIDS = 256;
-	const int N_PROBE = 8;
+	const long QUERY_SIZE = 100;
+	const int NUM_CENTROIDS = 32;
+	const int N_PROBE = 4;
 
-	std::vector<float> data(INDEX_SIZE * DIM);
+	alignas(64) std::vector<float> data(INDEX_SIZE * DIM);
 
 	std::mt19937 gen(std::random_device{}()); // Mersenne Twister engine
 	// Set seed

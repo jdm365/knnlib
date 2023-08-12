@@ -8,8 +8,7 @@
 
 #include "../include/distance.h"
 
-// #define CHUNK_SIZE 1000 
-#define CHUNK_SIZE 900
+#define CHUNK_SIZE 256
 
 class IVFIndex {
 	public:
@@ -17,10 +16,9 @@ class IVFIndex {
 		int num_centroids;
 		int n_probe;
 		int size = 0;
-		// std::vector<float>& data = *new std::vector<float>();
-		std::vector<float> data;
-		std::vector<float> centroids;
-		std::vector<std::vector<float>> centroid_vectors = std::vector<std::vector<float>>(num_centroids);
+		alignas(16) std::vector<float> data;
+		alignas(16) std::vector<float> centroids;
+		alignas(16) std::vector<std::vector<float>> centroid_vectors = std::vector<std::vector<float>>(num_centroids);
 		std::vector<int> centroid_assignments;
 		std::vector<std::vector<int>> centroid_indices = std::vector<std::vector<int>>(num_centroids);
 
@@ -48,4 +46,13 @@ void kmeanspp_initialize(
 		int dim,
 		int num_centroids,
 		const int kpp_centroids
+		);
+void kmeans(
+		std::vector<float>& data,
+		std::vector<float>& centroids,
+		std::vector<int>& centroid_assignments,
+		int dim,
+		int num_centroids,
+		int num_iters,
+		float lr
 		);

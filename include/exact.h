@@ -15,6 +15,37 @@
 #include "../include/ivf.h"
 #include "../include/distance.h"
 #include "../include/sort.h"
+#include "../include/avx2.h"
+
+
+template <typename T>
+void _get_exact_knn_fused_avx2(
+	const T* query_vector,
+	const std::vector<T>& data,
+	std::priority_queue<
+		std::pair<float, int>, 
+		std::vector<std::pair<float, int>>, 
+		std::greater<std::pair<float, int>>
+	>& max_heap,
+	std::vector<int>& index_map,
+	int dim
+	) {
+	float threshold = max_heap.top().first;
+
+	int num_data = (int)data.size() / dim;
+    for (int idx = 0; idx < num_data; ++idx) {
+		float distance = dot_product_avx2(
+			query_vector,
+			data.data() + idx * dim,
+			dim
+		);
+		if (distance > threshold) [[unlikely]] {
+			max_heap.pop();
+			max_heap.push({distance, index_map[idx]});
+			threshold = distance;
+		}
+	}
+}
 
 template <typename T>
 void _get_exact_knn_fused(
@@ -37,9 +68,10 @@ void _get_exact_knn_fused(
 	// distances = data @ query.T
 
 	// auto start = std::chrono::high_resolution_clock::now();
+	int num_data = (int)data.size() / dim;
 
-	for (int chunk_start = 0; chunk_start < (int)data.size() / dim; chunk_start += CHUNK_SIZE) {
-		int chunk_rows = std::min(CHUNK_SIZE, ((int)data.size() / dim) - chunk_start);
+	for (int chunk_start = 0; chunk_start < num_data; chunk_start += CHUNK_SIZE) {
+		int chunk_rows = std::min(CHUNK_SIZE, (num_data - chunk_start));
 		
 		// auto start = std::chrono::high_resolution_clock::now();
 		cblas_sgemv(
@@ -66,7 +98,6 @@ void _get_exact_knn_fused(
 				max_heap.push({distance, index_map[chunk_start + idx]});
 				continue;
 			}
-			// if (distance > max_heap.top().first) [[unlikely]] {
 			if (distance > max_heap.top().first) {
 				max_heap.pop();
 				max_heap.push({distance, index_map[chunk_start + idx]});
@@ -247,15 +278,15 @@ std::vector<std::vector<std::pair<float, int>>> get_exact_knn_blas(
 template <typename T>
 std::vector<int> get_centroid_assignments(
     const std::vector<T>& query_vectors,
-    const std::vector<T>& _data,
+    const std::vector<T>& _centroids,
     int dim
 	) {
     long num_queries = query_vectors.size() / dim;
-	long num_data = _data.size() / dim;
+	long num_data = _centroids.size() / dim;
 
 	const int BATCH_SIZE = 1024;
 
-	std::vector<T> data = l2_norm_data(_data, dim);
+	std::vector<T> centroids = l2_norm_data(_centroids, dim);
 
 	// Allocate memory for results
 	std::vector<int> results(num_queries);
@@ -281,15 +312,15 @@ std::vector<int> get_centroid_assignments(
 				1.0f,									// alpha
 				query_vectors.data() + batch_idx * dim,	// A
 				dim,									// lda
-				data.data(),							// B
+				centroids.data(),						// B
 				dim,									// ldb
 				0.0f,									// beta
 				distances.data(),						// C
 				num_data								// ldc
 				);
 
-		// Get argmins of distances.
-		// #pragma omp parallel for schedule(static)
+		// Get argmaxes of distances.
+		#pragma omp parallel for schedule(static)
 		for (int query_idx = 0; query_idx < current_batch_size; ++query_idx) {
 			float max_dist = -1.0f;
 			int   max_idx  = -1;
