@@ -49,7 +49,8 @@ int main() {
 	std::vector<float> query_data = std::vector<float>(data.begin(), data.begin() + QUERY_SIZE * DIM);
 
 	auto start = std::chrono::high_resolution_clock::now();
-	std::vector<std::vector<std::pair<float, int>>> results = index.search(query_data, 5);
+	// std::vector<std::vector<std::pair<float, int>>> results = index.search(query_data, 5);
+	std::vector<std::vector<std::pair<float, int>>> results = index.search_auto(query_data, 5);
 	/*
 	std::vector<std::vector<std::pair<float, int>>> results = get_exact_knn_blas(
 			quantized_query_data, 

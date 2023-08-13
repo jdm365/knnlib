@@ -33,8 +33,20 @@ void kmeanspp_initialize(
 		centroids[jdx] = data[rand_idx * dim + jdx];
 	}
 
-	for (int idx = 1; idx < kpp_centroids; ++idx) {
-		std::vector<float> min_dists((int)data.size() / (int)dim, std::numeric_limits<float>::max());
+	// Randomly initialize remaining centroids
+	#pragma omp parallel for
+	for (int idx = 1; idx < num_centroids - kpp_centroids; ++idx) {
+		int rand_idx = dis(gen);
+		for (int jdx = 0; jdx < dim; ++jdx) {
+			centroids[idx * dim + jdx] = data[rand_idx * dim + jdx];
+		}
+	}
+
+	for (int idx = num_centroids - kpp_centroids; idx < num_centroids; ++idx) {
+		std::vector<float> min_dists(
+				(int)data.size() / (int)dim, 
+				std::numeric_limits<float>::max()
+				);
 
 		// Calculate distances to closest centroids
 		min_dists = get_min_dists(
@@ -52,14 +64,6 @@ void kmeanspp_initialize(
 		}
 	}
 
-	// Randomly initialize remaining centroids
-	#pragma omp parallel for
-	for (int idx = kpp_centroids; idx < num_centroids; ++idx) {
-		int rand_idx = dis(gen);
-		for (int jdx = 0; jdx < dim; ++jdx) {
-			centroids[idx * dim + jdx] = data[rand_idx * dim + jdx];
-		}
-	}
 }
 
 void kmeans(
@@ -145,6 +149,7 @@ void IVFIndex::train(std::vector<float>& train_data) {
 	l2_norm_data(train_data, this->dim);
 
 	// Kmeans++ initialization
+	// const int kpp_centroids = sqrt(num_centroids);
 	const int kpp_centroids = 1;
 	kmeanspp_initialize(train_data, centroids, dim, num_centroids, kpp_centroids);
 	
@@ -208,6 +213,79 @@ std::vector<std::vector<std::pair<float, int>>> IVFIndex::search(const std::vect
 		> max_heap;
 
         for (int probe_idx = 0; probe_idx < n_probe; ++probe_idx) {
+            int centroid_idx = nearest_idxs[query_idx][probe_idx].second;
+
+			if (centroid_vectors[centroid_idx].size() == 0) {
+				continue;
+			}
+
+			_get_exact_knn_fused(
+					query.data() + query_idx * dim,
+					centroid_vectors[centroid_idx],
+					distances,
+					max_heap,
+					centroid_indices[centroid_idx],
+					dim,
+					std::min(k, (int)centroid_vectors[centroid_idx].size() / dim)
+					);
+
+			/*
+			_get_exact_knn_fused_avx2(
+					query.data() + query_idx * dim,
+					centroid_vectors[centroid_idx],
+					max_heap,
+					centroid_indices[centroid_idx],
+					dim
+					);
+			*/
+		}
+
+		// Add to final_results by popping from min_heap
+		// final_results[query_idx].resize(k);
+		int num_iters = std::min(k, (int)max_heap.size());
+		for (int idx = 0; idx < num_iters; ++idx) {
+			final_results[query_idx][k - idx - 1] = max_heap.top();
+			final_results[query_idx][k - idx - 1].first = 2.0f - 2.0f * final_results[query_idx][k - idx - 1].first;
+			max_heap.pop();
+		}
+	}
+
+    return final_results;
+}
+
+
+std::vector<std::vector<std::pair<float, int>>> IVFIndex::search_auto(const std::vector<float>& _query, int k) {
+	alignas(16) std::vector<float> query = l2_norm_data(_query, dim);
+
+    int num_queries = query.size() / dim;
+    std::vector<std::vector<std::pair<float, int>>> final_results(
+			num_queries,
+			std::vector<std::pair<float, int>>(k, std::make_pair(0.0f, 0))
+			);
+
+    // Find n_probe nearest centroids
+    std::vector<std::vector<std::pair<float, int>>> nearest_idxs = get_exact_knn_blas(
+        query, 
+        centroids, 
+        dim, 
+       	num_centroids
+    );
+	// openblas_set_num_threads(6);
+
+	// Upper bound on size of distances. If all data were in one centroid.
+	std::vector<float> distances(CHUNK_SIZE);
+    for (int query_idx = 0; query_idx < num_queries; ++query_idx) {
+		std::priority_queue<
+			std::pair<float, int>, 
+			std::vector<std::pair<float, int>>, 
+			std::greater<std::pair<float, int>>
+		> max_heap;
+
+        for (int probe_idx = 0; probe_idx < num_centroids; ++probe_idx) {
+			if (nearest_idxs[query_idx][probe_idx].first > 0.45f) {
+				break;
+			}
+
             int centroid_idx = nearest_idxs[query_idx][probe_idx].second;
 
 			if (centroid_vectors[centroid_idx].size() == 0) {

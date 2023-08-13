@@ -37,6 +37,7 @@ class IVFIndex {
 		void train_wrapper(pybind11::array_t<float> train_data);
 		std::vector<std::vector<std::pair<float, int>>> search(const std::vector<float>& query, int k);
 		std::vector<std::vector<std::pair<float, int>>> search_wrapper(pybind11::array_t<float> query, int k);
+		std::vector<std::vector<std::pair<float, int>>> search_auto(const std::vector<float>& query, int k);
 };
 
 

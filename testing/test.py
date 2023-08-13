@@ -111,7 +111,7 @@ if __name__ == '__main__':
     index_data = base_data
 
     k = 100
-    n_centroids = 64
+    n_centroids = 1024 
     n_probe = 4
 
     # flat search
