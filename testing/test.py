@@ -1,10 +1,9 @@
 import pandas as pd
 import numpy as np
-import faiss
+## import faiss
 import os
 from knnlib import FlatIndexL2, IVFIndex 
 from time import perf_counter
-
 
 
 
@@ -106,17 +105,21 @@ if __name__ == '__main__':
     query_data  = np.load(QUERY_PATH)
     learn_data  = np.load(LEARN_PATH)
     base_data   = np.load(BASE_PATH)
-    groundtruth = np.load(GROUNDTRUTH_PATH)
+    groundtruth = np.load(GROUNDTRUTH_PATH).astype(np.int32)
 
     index_data = base_data
 
     k = 100
     n_centroids = 1024 
-    n_probe = 4
+    n_probe = 1
 
     # flat search
-    #distances, indices = flat_search_knnlib(index_data, query_data, k)
-    #distances, indices = flat_search_faiss(index_data, query_data, k)
+    ## distances, indices = flat_search_knnlib(index_data, query_data, k)
+    ## distances, indices = flat_search_faiss(index_data, query_data, k)
+
+    print(f'INDEX DATA SHAPE: {index_data.shape}')
+    print(f'QUERY DATA SHAPE: {query_data.shape}')
+    print(f'GROUNDTRUTH SHAPE: {groundtruth.shape}')
 
     distances, indices = ivf_search_knnlib(index_data, query_data, k, n_centroids, n_probe)
     print(f'Top {k} recall knnlib: {evaluate_performance(groundtruth, indices)}')

@@ -3,12 +3,24 @@
 
 ## CPU Variables
 CXX = clang++
-#CXX = g++
+## CXX = g++
 CXX_FLAGS = -Wall -Wextra -std=c++17 -g
 CXX_FLAGS += -O3 -march=native -mtune=native -funroll-loops -fomit-frame-pointer
 CXX_FLAGS += -ffast-math -fno-finite-math-only -fno-signed-zeros -fno-trapping-math
 INCLUDE = -Iinclude/
-LIBS = -lstdc++ -fopenmp -lgomp -lopenblas
+LIBS = -lstdc++ -lopenblas
+
+
+OS := $(shell uname)
+ifeq ($(OS),Darwin)
+	BLAS_INCLUDE := $(shell brew --prefix openblas)/include 
+	BLAS_LIB := $(shell brew --prefix openblas)/lib
+
+	LIBS += -Xpreprocessor -fopenmp -lomp -L$(BLAS_LIB) -I$(BLAS_INCLUDE) -lopenblas
+else
+	LIBS += -fopenmp -lgomp
+endif
+
 CLANG_LIBS = -stdlib=libc++
 ifeq ($(CXX),clang++)
 	LIBS += $(CLANG_LIBS)
@@ -22,15 +34,25 @@ NVCC_FLAGS += -Xcompiler -Wall,-Wextra,-Wno-deprecated-gpu-targets
 CULIBS = -lcuda -lcublas -lcudart
 CUBIN = bin/release/gpu
 
+PYTHON_BIN = python
+PYBIND_FLAGS = $(shell $(PYTHON_BIN) -m pybind11 --includes)
+PYTHON_CONFIG = $(PYTHON_BIN)-config
+PYTHON_INCLUDES = $(shell $(PYTHON_CONFIG) --includes)
+PYTHON_LDFLAGS = $(shell $(PYTHON_CONFIG) --ldflags)
+
+TARGET = bin/release/$(MODULE_NAME)
 MODULE_NAME = knnlib
-PYBIN = bin/python/knnlib/$(MODULE_NAME)
-PYBIND11_FLAGS = `python3-config --extension-suffix` python/* -shared -std=c++17 -fPIC `python3 -m pybind11 --includes`
+PYBIND_FLAGS = $(shell $(PYTHON_BIN) -m pybind11 --includes)
+EXTENSION_SUFFIX = $(shell python3-config --extension-suffix)
+PYBIN = bin/python/$(MODULE_NAME)/$(MODULE_NAME)$(EXTENSION_SUFFIX)
+
+LD_FLAGS = $(LIBS) $(PYTHON_LDFLAGS)
 
 cpu:
 	$(CXX) $(CXX_FLAGS) -o $(BIN) src/* $(INCLUDE) $(LIBS) `python3 -m pybind11 --includes`
 
-py:
-	$(CXX) $(CXX_FLAGS) -o $(PYBIN)$(PYBIND11_FLAGS) src/* $(INCLUDE) $(LIBS)
+install:
+	$(CXX) $(CXX_FLAGS) -o $(PYBIN) $(PYBIND_FLAGS) -shared -std=c++11 -fPIC -undefined dynamic_lookup src/* python/*.cpp $(INCLUDE) $(LD_FLAGS)
 	cd bin/python && python -m pip install .
 
 gpu:

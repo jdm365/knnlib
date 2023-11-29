@@ -1,7 +1,8 @@
 #include <immintrin.h>
 
-#include "../include/avx2.h"
+#include "avx2.h"
 
+Precalc T;
 
 int filter_avx2(float* a, float* b, float* idxs, float _cutoff, int N) {
     const __m256 cutoff = _mm256_set1_ps(_cutoff);

@@ -10,7 +10,7 @@ int dot_product_filter_avx2(float* a, float* b, float* idxs, float cutoff, int n
 struct Precalc {
     alignas(64) int permutation[256][8];
 
-    constexpr Precalc(): permutation{} {
+    Precalc() {
         for (int m = 0; m < 256; ++m) {
             int k = 0;
             for (int idx = 0; idx < 8; ++idx)
@@ -20,4 +20,4 @@ struct Precalc {
     }
 };
 
-constexpr Precalc T;
+extern Precalc T;

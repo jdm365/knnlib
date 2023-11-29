@@ -9,9 +9,9 @@
 #include <omp.h>
 
 
-#include "../include/distance.h"
-#include "../include/exact.h"
-#include "../include/ivf.h"
+#include "distance.h"
+#include "exact.h"
+#include "ivf.h"
 
 
 void kmeanspp_initialize(
