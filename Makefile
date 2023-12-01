@@ -6,7 +6,9 @@ CXX = clang++
 ## CXX = g++
 CXX_FLAGS = -Wall -Wextra -std=c++17 -g
 CXX_FLAGS += -O3 -march=native -mtune=native -funroll-loops -fomit-frame-pointer
+CXX_FLAGS += -Wno-unused-variable -Wno-unused-parameter
 CXX_FLAGS += -ffast-math -fno-finite-math-only -fno-signed-zeros -fno-trapping-math
+#CXX_FLAGS += -fsanitize=address -fsanitize=undefined -fno-sanitize-recover
 INCLUDE = -Iinclude/
 LIBS = -lstdc++ -lopenblas
 
@@ -17,8 +19,10 @@ ifeq ($(OS),Darwin)
 	BLAS_LIB := $(shell brew --prefix openblas)/lib
 
 	LIBS += -Xpreprocessor -fopenmp -lomp -L$(BLAS_LIB) -I$(BLAS_INCLUDE) -lopenblas
+	DYNAMIC_LOOKUP = -undefined dynamic_lookup
 else
 	LIBS += -fopenmp -lgomp
+	DYNAMIC_LOOKUP =
 endif
 
 CLANG_LIBS = -stdlib=libc++
@@ -52,7 +56,7 @@ cpu:
 	$(CXX) $(CXX_FLAGS) -o $(BIN) src/* $(INCLUDE) $(LIBS) `python3 -m pybind11 --includes`
 
 install:
-	$(CXX) $(CXX_FLAGS) -o $(PYBIN) $(PYBIND_FLAGS) -shared -std=c++11 -fPIC -undefined dynamic_lookup src/* python/*.cpp $(INCLUDE) $(LD_FLAGS)
+	$(CXX) $(CXX_FLAGS) -o $(PYBIN) $(PYBIND_FLAGS) -shared -std=c++11 -fPIC $(DYNAMIC_LOOKUP) src/* python/*.cpp $(INCLUDE) $(LD_FLAGS)
 	cd bin/python && python -m pip install .
 
 gpu:

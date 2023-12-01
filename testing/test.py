@@ -1,6 +1,6 @@
 import pandas as pd
 import numpy as np
-## import faiss
+import faiss
 import os
 from knnlib import FlatIndexL2, IVFIndex 
 from time import perf_counter
@@ -42,9 +42,10 @@ def flat_search_faiss(index_data, query_data, k):
 
 
 def ivf_search_knnlib(index_data, query_data, k, n_centroids, n_probe):
-    index = IVFIndex(index_data.shape[1], n_centroids, n_probe)
+    index = IVFIndex(index_data.shape[1], n_centroids, True)
     index.add(index_data)
     index.train(index_data)
+    index.nprobe = n_probe
 
     init = perf_counter()
     results = index.search(query_data, k)
@@ -111,7 +112,7 @@ if __name__ == '__main__':
 
     k = 100
     n_centroids = 1024 
-    n_probe = 1
+    n_probe = 4
 
     # flat search
     ## distances, indices = flat_search_knnlib(index_data, query_data, k)

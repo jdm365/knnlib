@@ -144,8 +144,6 @@ void IVFIndex::train(std::vector<float>& train_data) {
 	// Run k-means
 	// Calculate optimal centroids and copy vectors to centroid
 
-	std::cout << "...Training Clusters..." << std::endl;
-
 	l2_norm_data(train_data, this->dim);
 
 	// Kmeans++ initialization
@@ -155,7 +153,7 @@ void IVFIndex::train(std::vector<float>& train_data) {
 	
 	const int NUM_ITERS = 10;
 	float LR = 0.9f;
-	auto start = std::chrono::high_resolution_clock::now();
+	// auto start = std::chrono::high_resolution_clock::now();
 
 	kmeans(
 			train_data,
@@ -179,13 +177,32 @@ void IVFIndex::train(std::vector<float>& train_data) {
 		// Get centroid_indices
 		centroid_indices[centroid_idx].push_back(idx);
 	}
-	auto end = std::chrono::high_resolution_clock::now();
-	auto iteration_time = std::chrono::duration_cast<std::chrono::milliseconds>(end - start).count() / NUM_ITERS;
-	std::cout << "Avg. iteration time: " << iteration_time << " milliseconds" << std::endl;
+	// auto end = std::chrono::high_resolution_clock::now();
+	// auto iteration_time = std::chrono::duration_cast<std::chrono::milliseconds>(end - start).count() / NUM_ITERS;
+	// std::cout << "Avg. iteration time: " << iteration_time << " milliseconds" << std::endl;
+
+	if (use_pq) {
+		// Train product quantizer
+		if (!pq.is_trained) {
+			train_quantizer(pq, train_data, dim);
+		}
+		for (int centroid_idx = 0; centroid_idx < num_centroids; ++centroid_idx) {
+			std::cout << "Quantizing centroid " << centroid_idx << std::endl;
+			for (int idx = 0; idx < (int)centroid_vectors[centroid_idx].size() / (int)dim; ++idx) {
+				quantized_centroid_vectors.push_back(
+						product_quantize(centroid_vectors[centroid_idx], pq)
+						);
+			}
+
+		}
+	}
 }
 
 
 std::vector<std::vector<std::pair<float, int>>> IVFIndex::search(const std::vector<float>& _query, int k) {
+	if (use_pq) {
+		return _search_with_quantization(_query, k);
+	}
 	alignas(16) std::vector<float> query = l2_norm_data(_query, dim);
 
     int num_queries = query.size() / dim;
@@ -228,20 +245,76 @@ std::vector<std::vector<std::pair<float, int>>> IVFIndex::search(const std::vect
 					dim,
 					std::min(k, (int)centroid_vectors[centroid_idx].size() / dim)
 					);
-
-			/*
-			_get_exact_knn_fused_avx2(
-					query.data() + query_idx * dim,
-					centroid_vectors[centroid_idx],
-					max_heap,
-					centroid_indices[centroid_idx],
-					dim
-					);
-			*/
 		}
 
 		// Add to final_results by popping from min_heap
-		// final_results[query_idx].resize(k);
+		int num_iters = std::min(k, (int)max_heap.size());
+		for (int idx = 0; idx < num_iters; ++idx) {
+			final_results[query_idx][k - idx - 1] = max_heap.top();
+			final_results[query_idx][k - idx - 1].first = 2.0f - 2.0f * final_results[query_idx][k - idx - 1].first;
+			max_heap.pop();
+		}
+	}
+
+    return final_results;
+}
+
+std::vector<std::vector<std::pair<float, int>>> IVFIndex::_search_with_quantization(
+		const std::vector<float>& _query, 
+		int k
+		) {
+	if (quantized_centroid_vectors.size() == 0) {
+		std::cout << "You must train the index first." << std::endl;
+		exit(1);
+	}
+
+	alignas(16) std::vector<float> query = l2_norm_data(_query, dim);
+
+    int num_queries = query.size() / dim;
+    std::vector<std::vector<std::pair<float, int>>> final_results(
+			num_queries,
+			std::vector<std::pair<float, int>>(k, std::make_pair(0.0f, 0))
+			);
+
+    // Find n_probe nearest centroids
+    std::vector<std::vector<std::pair<float, int>>> nearest_idxs = get_exact_knn_blas(
+        query, 
+        centroids, 
+        dim, 
+        n_probe
+    );
+
+	// Quantize query
+	std::vector<uint8_t> query_codes = product_quantize(query, pq);
+
+	// Upper bound on size of distances. If all data were in one centroid.
+	std::vector<float> distances(CHUNK_SIZE);
+    for (int query_idx = 0; query_idx < num_queries; ++query_idx) {
+		std::priority_queue<
+			std::pair<float, int>, 
+			std::vector<std::pair<float, int>>, 
+			std::greater<std::pair<float, int>>
+		> max_heap;
+
+        for (int probe_idx = 0; probe_idx < n_probe; ++probe_idx) {
+            int centroid_idx = nearest_idxs[query_idx][probe_idx].second;
+
+			if (centroid_vectors[centroid_idx].size() == 0) {
+				continue;
+			}
+
+			_get_exact_knn_pq(
+					query_codes.data() + query_idx * pq.num_subvectors,
+					quantized_centroid_vectors[centroid_idx],
+					distances,
+					max_heap,
+					centroid_indices[centroid_idx],
+					pq.num_subvectors,
+					std::min(k, (int)quantized_centroid_vectors[centroid_idx].size() / pq.num_subvectors)
+					);
+		}
+
+		// Add to final_results by popping from min_heap
 		int num_iters = std::min(k, (int)max_heap.size());
 		for (int idx = 0; idx < num_iters; ++idx) {
 			final_results[query_idx][k - idx - 1] = max_heap.top();
