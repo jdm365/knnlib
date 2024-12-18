@@ -2,8 +2,8 @@
 .PHONY: gpu cpu run clean
 
 ## CPU Variables
-CXX = clang++
-## CXX = g++
+## CXX = clang++
+CXX = g++
 CXX_FLAGS = -Wall -Wextra -std=c++17 -g
 CXX_FLAGS += -O3 -march=native -mtune=native -funroll-loops -fomit-frame-pointer
 CXX_FLAGS += -Wno-unused-variable -Wno-unused-parameter
